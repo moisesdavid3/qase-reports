@@ -1,17 +1,22 @@
 import { useState } from 'react';
 import { useProjects } from '../hooks/useProjects';
 import { ProjectCard } from './ProjectCard';
-import { Search, Loader2, AlertCircle, BarChart2 } from 'lucide-react';
+import { Search, Loader2, AlertCircle, BarChart2, ChevronDown } from 'lucide-react';
+import { WORKSPACES } from '../types/qase';
+import type { Workspace, QaseProject } from '../types/qase';
 
 interface Props {
   selectedCodes: string[];
   onSelectionChange: (codes: string[]) => void;
-  onBuildReport: () => void;
+  onBuildReport: (projects: QaseProject[]) => void;
+  workspace: Workspace;
+  onWorkspaceChange: (workspace: Workspace) => void;
 }
 
-export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildReport }: Props) {
+export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildReport, workspace, onWorkspaceChange }: Props) {
   const [search, setSearch] = useState('');
-  const { data, isLoading, isError, error } = useProjects();
+  const [wsOpen, setWsOpen] = useState(false);
+  const { data, isLoading, isError, error } = useProjects(workspace.token);
 
   const projects = data?.result.entities ?? [];
   const filtered = projects.filter(
@@ -36,6 +41,13 @@ export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildRepor
     onSelectionChange([]);
   }
 
+  function switchWorkspace(ws: Workspace) {
+    onWorkspaceChange(ws);
+    onSelectionChange([]);
+    setWsOpen(false);
+    setSearch('');
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -44,6 +56,35 @@ export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildRepor
         <p className="text-sm text-gray-500 mt-1">
           Select one or more projects to build a report
         </p>
+
+        {/* Workspace selector */}
+        <div className="relative mt-3">
+          <button
+            onClick={() => setWsOpen((o) => !o)}
+            className="flex items-center gap-2 text-sm font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-1.5 hover:bg-violet-100 transition-colors"
+          >
+            <span>{workspace.label}</span>
+            <ChevronDown size={14} className={`transition-transform ${wsOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {wsOpen && (
+            <div className="absolute top-full left-0 mt-1 z-10 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden w-56">
+              {WORKSPACES.map((ws) => (
+                <button
+                  key={ws.id}
+                  onClick={() => switchWorkspace(ws)}
+                  className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
+                    ws.id === workspace.id
+                      ? 'bg-violet-50 text-violet-700 font-medium'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {ws.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Search + actions */}
@@ -120,7 +161,7 @@ export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildRepor
       {/* Footer CTA */}
       <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
         <button
-          onClick={onBuildReport}
+          onClick={() => onBuildReport(projects.filter((p) => selectedCodes.includes(p.code)))}
           disabled={selectedCodes.length === 0}
           className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-violet-600 text-white font-medium text-sm hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >

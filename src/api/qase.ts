@@ -1,19 +1,39 @@
 import axios from 'axios';
-import type { QaseProjectsResponse } from '../types/qase';
+import type { QaseProjectsResponse, QaseRunsResponse, QaseUsersResponse } from '../types/qase';
 
-const token = import.meta.env.VITE_QASE_API_TOKEN;
+function createClient(token: string) {
+  return axios.create({
+    baseURL: '/api/qase',
+    headers: {
+      'Token': token,
+      'Content-Type': 'application/json',
+    },
+  });
+}
 
-const client = axios.create({
-  baseURL: '/api/qase',
-  headers: {
-    'Token': token,
-    'Content-Type': 'application/json',
-  },
-});
-
-export async function fetchProjects(limit = 100, offset = 0): Promise<QaseProjectsResponse> {
-  const { data } = await client.get<QaseProjectsResponse>('/project', {
+export async function fetchProjects(token: string, limit = 100, offset = 0): Promise<QaseProjectsResponse> {
+  const { data } = await createClient(token).get<QaseProjectsResponse>('/project', {
     params: { limit, offset },
+  });
+  return data;
+}
+
+export async function fetchRuns(
+  token: string,
+  projectCode: string,
+  limit = 20,
+  offset = 0,
+  search = '',
+): Promise<QaseRunsResponse> {
+  const { data } = await createClient(token).get<QaseRunsResponse>(`/run/${projectCode}`, {
+    params: { limit, offset, ...(search ? { search } : {}) },
+  });
+  return data;
+}
+
+export async function fetchUsers(token: string): Promise<QaseUsersResponse> {
+  const { data } = await createClient(token).get<QaseUsersResponse>('/user', {
+    params: { limit: 100 },
   });
   return data;
 }
