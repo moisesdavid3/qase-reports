@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Bot, Wrench, Clock } from 'lucide-react';
 import type { QaseProject, Workspace, QaseCase } from '../types/qase';
 import { useCasesTotal, useAllCases } from '../hooks/useCases';
@@ -336,6 +336,10 @@ function ProjectAutomationSection({
 }
 
 export function AutomationReport({ projects, workspace }: Props) {
+  const [selectedCode, setSelectedCode] = useState<string>(projects[0]?.code ?? '');
+
+  const selected = projects.find((p) => p.code === selectedCode) ?? projects[0];
+
   return (
     <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
       <div>
@@ -345,13 +349,37 @@ export function AutomationReport({ projects, workspace }: Props) {
           Delta shows week-over-week change in ratio.
         </p>
       </div>
-      {projects.map((project) => (
+
+      {projects.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          {projects.map((p) => (
+            <button
+              key={p.code}
+              onClick={() => setSelectedCode(p.code)}
+              className={[
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border',
+                selectedCode === p.code
+                  ? 'bg-violet-600 text-white border-violet-600'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50',
+              ].join(' ')}
+            >
+              <span className={[
+                'font-mono text-xs px-1 py-0.5 rounded',
+                selectedCode === p.code ? 'bg-violet-500 text-white' : 'bg-violet-100 text-violet-700',
+              ].join(' ')}>{p.code}</span>
+              {p.title}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selected && (
         <ProjectAutomationSection
-          key={project.code}
-          project={project}
+          key={selected.code}
+          project={selected}
           token={workspace.token}
         />
-      ))}
+      )}
     </div>
   );
 }

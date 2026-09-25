@@ -2,13 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft, CheckSquare, Layers, Milestone, Play, Bug,
-  ChevronDown, Loader2, AlertCircle, Search, ChevronLeft, ChevronRight, X, Download, Bot,
+  ChevronDown, Loader2, AlertCircle, Search, ChevronLeft, ChevronRight, X, Download, Bot, CalendarDays,
 } from 'lucide-react';
 import type { QaseProject, Workspace } from '../types/qase';
 import { useRuns, useRunsTotal, useAllRuns, PAGE_SIZE } from '../hooks/useRuns';
 import { useUsers } from '../hooks/useUsers';
 import { exportCSV, exportXLSX } from '../utils/exportRuns';
 import { AutomationReport } from './AutomationReport';
+import { WeeklyRunReport } from './WeeklyRunReport';
 
 interface Props {
   projects: QaseProject[];
@@ -16,7 +17,7 @@ interface Props {
   onBack: () => void;
 }
 
-type Tab = 'overview' | 'automation';
+type Tab = 'overview' | 'automation' | 'weekly';
 
 export function ReportView({ projects, workspace, onBack }: Props) {
   const [tab, setTab] = useState<Tab>('overview');
@@ -59,11 +60,22 @@ export function ReportView({ projects, workspace, onBack }: Props) {
             <Bot size={13} />
             Automation
           </button>
+          <button
+            onClick={() => setTab('weekly')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === 'weekly' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <CalendarDays size={13} />
+            Weekly
+          </button>
         </div>
       </div>
 
       {tab === 'automation' && (
         <AutomationReport projects={projects} workspace={workspace} />
+      )}
+
+      {tab === 'weekly' && (
+        <WeeklyRunReport projects={projects} workspace={workspace} />
       )}
 
       {tab === 'overview' && (
