@@ -19,11 +19,13 @@ export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildRepor
   const { data, isLoading, isError, error } = useProjects(workspace.token);
 
   const projects = data?.result.entities ?? [];
-  const filtered = projects.filter(
-    (p) =>
-      p.title.toLowerCase().includes(search.toLowerCase()) ||
-      p.code.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = projects
+    .filter(
+      (p) =>
+        p.title.toLowerCase().includes(search.toLowerCase()) ||
+        p.code.toLowerCase().includes(search.toLowerCase()),
+    )
+    .sort((a, b) => b.counts.runs.total - a.counts.runs.total);
 
   function toggleProject(code: string) {
     if (selectedCodes.includes(code)) {
@@ -52,10 +54,27 @@ export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildRepor
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="px-6 py-5 border-b border-gray-100">
-        <h1 className="text-2xl font-bold text-gray-900">Qase Reports</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Select one or more projects to build a report
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Qase Reports</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Select one or more projects to build a report
+            </p>
+          </div>
+          <button
+            onClick={() => onBuildReport(projects.filter((p) => selectedCodes.includes(p.code)))}
+            disabled={selectedCodes.length === 0}
+            className="flex-shrink-0 flex items-center gap-2 py-2 px-4 rounded-lg bg-violet-600 text-white font-medium text-sm hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <BarChart2 size={15} />
+            Generate Report
+            {selectedCodes.length > 0 && (
+              <span className="bg-violet-500 text-white text-xs px-1.5 py-0.5 rounded-full">
+                {selectedCodes.length}
+              </span>
+            )}
+          </button>
+        </div>
 
         {/* Workspace selector */}
         <div className="relative mt-3">
@@ -124,7 +143,7 @@ export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildRepor
       </div>
 
       {/* Project list */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+      <div className="flex-1 overflow-y-auto px-6 py-4">
         {isLoading && (
           <div className="flex items-center justify-center py-16 text-gray-400">
             <Loader2 size={24} className="animate-spin mr-2" />
@@ -148,31 +167,16 @@ export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildRepor
           <p className="text-center text-gray-400 py-12 text-sm">No projects match your search.</p>
         )}
 
-        {filtered.map((project) => (
-          <ProjectCard
-            key={project.code}
-            project={project}
-            selected={selectedCodes.includes(project.code)}
-            onToggle={toggleProject}
-          />
-        ))}
-      </div>
-
-      {/* Footer CTA */}
-      <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
-        <button
-          onClick={() => onBuildReport(projects.filter((p) => selectedCodes.includes(p.code)))}
-          disabled={selectedCodes.length === 0}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-violet-600 text-white font-medium text-sm hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          <BarChart2 size={16} />
-          Build Report
-          {selectedCodes.length > 0 && (
-            <span className="ml-1 bg-violet-500 text-white text-xs px-2 py-0.5 rounded-full">
-              {selectedCodes.length}
-            </span>
-          )}
-        </button>
+        <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+          {filtered.map((project) => (
+            <ProjectCard
+              key={project.code}
+              project={project}
+              selected={selectedCodes.includes(project.code)}
+              onToggle={toggleProject}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
