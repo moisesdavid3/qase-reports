@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { QaseProjectsResponse, QaseRunsResponse, QaseUsersResponse } from '../types/qase';
+import type { QaseProjectsResponse, QaseRunsResponse, QaseUsersResponse, QaseCasesResponse } from '../types/qase';
 
 function createClient(token: string) {
   return axios.create({
@@ -34,6 +34,18 @@ export async function fetchRuns(
 export async function fetchUsers(token: string): Promise<QaseUsersResponse> {
   const { data } = await createClient(token).get<QaseUsersResponse>('/user', {
     params: { limit: 100 },
+  });
+  return data;
+}
+
+export async function fetchCases(
+  token: string,
+  projectCode: string,
+  limit = 100,
+  offset = 0,
+): Promise<QaseCasesResponse> {
+  const { data } = await createClient(token).get<QaseCasesResponse>(`/case/${projectCode}`, {
+    params: { limit, offset },
   });
   return data;
 }

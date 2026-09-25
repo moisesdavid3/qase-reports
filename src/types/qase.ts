@@ -93,3 +93,20 @@ export interface QaseProjectsResponse {
     entities: QaseProject[];
   };
 }
+
+export interface QaseCase {
+  id: number;
+  automation: 0 | 1 | 2; // 0 = manual, 1 = to_be_automated, 2 = automated
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QaseCasesResponse {
+  status: boolean;
+  result: {
+    total: number;
+    filtered: number;
+    count: number;
+    entities: QaseCase[];
+  };
+}

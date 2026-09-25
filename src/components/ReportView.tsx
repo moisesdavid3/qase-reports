@@ -2,12 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft, CheckSquare, Layers, Milestone, Play, Bug,
-  ChevronDown, Loader2, AlertCircle, Search, ChevronLeft, ChevronRight, X, Download,
+  ChevronDown, Loader2, AlertCircle, Search, ChevronLeft, ChevronRight, X, Download, Bot,
 } from 'lucide-react';
 import type { QaseProject, Workspace } from '../types/qase';
 import { useRuns, useRunsTotal, useAllRuns, PAGE_SIZE } from '../hooks/useRuns';
 import { useUsers } from '../hooks/useUsers';
 import { exportCSV, exportXLSX } from '../utils/exportRuns';
+import { AutomationReport } from './AutomationReport';
 
 interface Props {
   projects: QaseProject[];
@@ -15,7 +16,11 @@ interface Props {
   onBack: () => void;
 }
 
+type Tab = 'overview' | 'automation';
+
 export function ReportView({ projects, workspace, onBack }: Props) {
+  const [tab, setTab] = useState<Tab>('overview');
+
   const totals = {
     cases: projects.reduce((s, p) => s + p.counts.cases, 0),
     suites: projects.reduce((s, p) => s + p.counts.suites, 0),
@@ -29,18 +34,39 @@ export function ReportView({ projects, workspace, onBack }: Props) {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-6 py-5 border-b border-gray-100 flex items-center gap-3">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3">
         <button onClick={onBack} className="text-gray-400 hover:text-gray-700 transition-colors">
           <ArrowLeft size={20} />
         </button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold text-gray-900">Report</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {workspace.label} · {projects.length} project{projects.length !== 1 ? 's' : ''}
           </p>
         </div>
+        {/* Tab bar */}
+        <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
+          <button
+            onClick={() => setTab('overview')}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === 'overview' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Overview
+          </button>
+          <button
+            onClick={() => setTab('automation')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === 'automation' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <Bot size={13} />
+            Automation
+          </button>
+        </div>
       </div>
 
+      {tab === 'automation' && (
+        <AutomationReport projects={projects} workspace={workspace} />
+      )}
+
+      {tab === 'overview' && (
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-8">
         {/* Summary cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -140,6 +166,7 @@ export function ReportView({ projects, workspace, onBack }: Props) {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -438,20 +465,32 @@ function ProjectRunsSection({ project, token }: { project: QaseProject; token: s
           )}
 
           {!isLoading && !isError && displayRuns.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div>
+              <table className="w-full text-sm table-fixed">
+                <colgroup>
+                  <col />
+                  <col className="w-28" />
+                  <col className="w-36" />
+                  <col className="w-14" />
+                  <col className="w-16" />
+                  <col className="w-14" />
+                  <col className="w-16" />
+                  <col className="w-16" />
+                  <col className="w-14" />
+                  <col className="w-20" />
+                </colgroup>
                 <thead>
                   <tr className="border-t border-gray-200 bg-white text-xs uppercase tracking-wide text-gray-400">
-                    <th className="text-left px-4 py-2.5 font-medium">Run</th>
-                    <th className="text-left px-4 py-2.5 font-medium whitespace-nowrap w-32">Run Status</th>
-                    <th className="text-left px-4 py-2.5 font-medium">Author</th>
-                    <th className="text-right px-4 py-2.5 font-medium">Total</th>
-                    <th className="text-right px-4 py-2.5 font-medium text-green-600">Passed</th>
-                    <th className="text-right px-4 py-2.5 font-medium text-red-500">Failed</th>
-                    <th className="text-right px-4 py-2.5 font-medium text-yellow-600">Blocked</th>
-                    <th className="text-right px-4 py-2.5 font-medium text-gray-400">Skipped</th>
-                    <th className="text-right px-4 py-2.5 font-medium text-purple-500">Invalid</th>
-                    <th className="text-right px-4 py-2.5 font-medium">Pass Rate</th>
+                    <th className="text-left px-3 py-2.5 font-medium">Run</th>
+                    <th className="text-left px-2 py-2.5 font-medium">Status</th>
+                    <th className="text-left px-2 py-2.5 font-medium">Author</th>
+                    <th className="text-right px-2 py-2.5 font-medium">Total</th>
+                    <th className="text-right px-2 py-2.5 font-medium text-green-600">Passed</th>
+                    <th className="text-right px-2 py-2.5 font-medium text-red-500">Failed</th>
+                    <th className="text-right px-2 py-2.5 font-medium text-yellow-600">Blocked</th>
+                    <th className="text-right px-2 py-2.5 font-medium text-gray-400">Skipped</th>
+                    <th className="text-right px-2 py-2.5 font-medium text-purple-500">Invalid</th>
+                    <th className="text-right px-2 py-2.5 font-medium">Pass Rate</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -461,33 +500,33 @@ function ProjectRunsSection({ project, token }: { project: QaseProject; token: s
                     const author = users.find((u) => u.id === run.user_id);
                     return (
                       <tr key={run.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-2.5">
-                          <div className="font-medium text-gray-900 truncate sm:max-w-xs md:max-w-sm lg:max-w-none">{run.title}</div>
+                        <td className="px-3 py-2.5 min-w-0">
+                          <div className="font-medium text-gray-900 truncate">{run.title}</div>
                           {run.start_time && (
                             <div className="text-xs text-gray-400 mt-0.5">
                               {new Date(run.start_time).toLocaleDateString()}
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-2.5 whitespace-nowrap"><StatusBadge status={run.status_text} /></td>
-                        <td className="px-4 py-2.5 text-sm text-gray-600 whitespace-nowrap">
+                        <td className="px-2 py-2.5"><StatusBadge status={run.status_text} /></td>
+                        <td className="px-2 py-2.5 text-sm text-gray-600 truncate">
                           {author?.name ?? <span className="text-gray-300">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right font-medium text-gray-700">{run.stats.total}</td>
-                        <td className="px-4 py-2.5 text-right text-green-600 font-medium">{run.stats.passed}</td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="px-2 py-2.5 text-right font-medium text-gray-700">{run.stats.total}</td>
+                        <td className="px-2 py-2.5 text-right text-green-600 font-medium">{run.stats.passed}</td>
+                        <td className="px-2 py-2.5 text-right">
                           {run.stats.failed > 0 ? <span className="text-red-500 font-medium">{run.stats.failed}</span> : <span className="text-gray-300">0</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="px-2 py-2.5 text-right">
                           {run.stats.blocked > 0 ? <span className="text-yellow-600 font-medium">{run.stats.blocked}</span> : <span className="text-gray-300">0</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right text-gray-400">{run.stats.skipped}</td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="px-2 py-2.5 text-right text-gray-400">{run.stats.skipped}</td>
+                        <td className="px-2 py-2.5 text-right">
                           {run.stats.invalid > 0 ? <span className="text-purple-500 font-medium">{run.stats.invalid}</span> : <span className="text-gray-300">0</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="px-2 py-2.5 text-right">
                           {passRate !== null ? (
-                            <span className={`font-semibold ${passRate >= 90 ? 'text-green-600' : passRate >= 70 ? 'text-yellow-600' : 'text-red-500'}`}>
+                            <span className={['font-semibold', passRate >= 90 ? 'text-green-600' : passRate >= 70 ? 'text-yellow-600' : 'text-red-500'].join(' ')}>
                               {passRate}%
                             </span>
                           ) : <span className="text-gray-300">—</span>}
@@ -509,7 +548,7 @@ function ProjectRunsSection({ project, token }: { project: QaseProject; token: s
                   >
                     <ChevronLeft size={16} />
                   </button>
-                  <span className="text-xs text-gray-600 px-2">{page} / {totalPages || 1}</span>
+                  <span className="text-xs text-gray-600 px-2">{`${page} / ${totalPages || 1}`}</span>
                   <button
                     onClick={() => setPage((p) => p + 1)}
                     disabled={page >= totalPages}
