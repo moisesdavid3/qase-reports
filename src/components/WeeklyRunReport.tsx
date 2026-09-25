@@ -127,9 +127,32 @@ function generateWeekAnalysis({
   return parts.join('');
 }
 
-// ─── Build weekly dataset ─────────────────────────────────────────────────────────────────
+// ─── Build dataset (weekly or bi-weekly) ─────────────────────────────────────────────────
 
-function buildWeeklyData(runs: QaseRun[], weeksBack = 20): WeekData[] {
+// Returns the monday Date for a given ISO week key
+function mondayOfWeek(weekKey: string): Date {
+  const [year, w] = weekKey.split('-W');
+  const jan4 = new Date(Date.UTC(Number(year), 0, 4));
+  const monday = new Date(jan4);
+  monday.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() || 7) - 1) + (Number(w) - 1) * 7);
+  return monday;
+}
+
+function periodLabel(weekKeys: string[]): string {
+  if (weekKeys.length === 1) return weekLabel(weekKeys[0]);
+  const start = mondayOfWeek(weekKeys[0]);
+  const endMonday = mondayOfWeek(weekKeys[weekKeys.length - 1]);
+  const endSunday = new Date(endMonday);
+  endSunday.setUTCDate(endMonday.getUTCDate() + 6);
+  const fmt = (d: Date) =>
+    d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const year = endSunday.getUTCFullYear();
+  return `${fmt(start)} – ${fmt(endSunday)}, ${year}`;
+}
+
+type Granularity = 'weekly' | 'biweekly';
+
+function buildWeeklyData(runs: QaseRun[], granularity: Granularity = 'weekly', periodsBack = 20): WeekData[] {
   const byWeek = new Map<string, QaseRun[]>();
   for (const run of runs) {
     if (!run.start_time) continue;
@@ -141,20 +164,34 @@ function buildWeeklyData(runs: QaseRun[], weeksBack = 20): WeekData[] {
 
   const now = new Date();
   const currentKey = isoWeekKey(now);
-  const weekKeys: string[] = [];
-  for (let i = weeksBack - 1; i >= 0; i--) {
+
+  // Build flat list of ISO week keys going back far enough
+  const step = granularity === 'biweekly' ? 2 : 1;
+  const weeksNeeded = periodsBack * step;
+  const allWeekKeys: string[] = [];
+  for (let i = weeksNeeded - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setUTCDate(d.getUTCDate() - i * 7);
-    weekKeys.push(isoWeekKey(d));
+    allWeekKeys.push(isoWeekKey(d));
+  }
+
+  // Group into periods (1 or 2 weeks each)
+  const periods: string[][] = [];
+  for (let i = 0; i < allWeekKeys.length; i += step) {
+    periods.push(allWeekKeys.slice(i, i + step));
   }
 
   const result: WeekData[] = [];
   let prevPassRate: number | null = null;
 
-  for (const key of weekKeys) {
-    if (key > currentKey) continue;
-    const weekRuns = byWeek.get(key) ?? [];
-    const totals = weekRuns.reduce(
+  for (const periodWeeks of periods) {
+    const lastKey = periodWeeks[periodWeeks.length - 1];
+    if (lastKey > currentKey) continue;
+
+    const periodRuns = periodWeeks.flatMap((k) => byWeek.get(k) ?? []);
+    const isCurrentPeriod = periodWeeks.includes(currentKey);
+
+    const totals = periodRuns.reduce(
       (acc, r) => ({
         total: acc.total + r.stats.total,
         passed: acc.passed + r.stats.passed,
@@ -170,24 +207,24 @@ function buildWeeklyData(runs: QaseRun[], weeksBack = 20): WeekData[] {
     const delta = prevPassRate !== null && totals.total > 0 ? passRate - prevPassRate : null;
 
     result.push({
-      weekKey: key,
-      label: weekLabel(key),
-      isCurrentWeek: key === currentKey,
-      runs: weekRuns,
+      weekKey: periodWeeks[0],
+      label: periodLabel(periodWeeks),
+      isCurrentWeek: isCurrentPeriod,
+      runs: periodRuns,
       ...totals,
       passRate,
       delta,
       analysis: generateWeekAnalysis({
-        runs: weekRuns,
+        runs: periodRuns,
         passRate,
         delta,
         total: totals.total,
         failed: totals.failed,
         blocked: totals.blocked,
         skipped: totals.skipped,
-        isCurrentWeek: key === currentKey,
+        isCurrentWeek: isCurrentPeriod,
       }),
-      topAreas: extractAreas(weekRuns),
+      topAreas: extractAreas(periodRuns),
     });
 
     if (totals.total > 0) prevPassRate = passRate;
@@ -470,7 +507,7 @@ function SummaryStats({ weeks }: { weeks: WeekData[] }) {
   return (
     <div className="grid grid-cols-4 gap-4">
       {[
-        { label: 'Total runs', value: totalRuns.toLocaleString(), sub: `last ${activeWeeks.length} weeks`, icon: <Play size={14} /> },
+        { label: 'Total runs', value: totalRuns.toLocaleString(), sub: `last ${activeWeeks.length} periods`, icon: <Play size={14} /> },
         { label: 'Total cases executed', value: totalCases.toLocaleString(), sub: 'across all runs', icon: <CheckCircle2 size={14} /> },
         { label: 'Avg pass rate', value: `${avgPassRate.toFixed(1)}%`, sub: trend !== null ? `${trend > 0 ? '↑' : trend < 0 ? '↓' : '→'} avg ${Math.abs(trend).toFixed(1)}pp/week` : 'no trend data', icon: <BarChart2 size={14} /> },
         { label: 'Total failed', value: totalFailed.toLocaleString(), sub: `${totalCases > 0 ? ((totalFailed / totalCases) * 100).toFixed(1) : 0}% of all cases`, icon: <XCircle size={14} /> },
@@ -487,7 +524,15 @@ function SummaryStats({ weeks }: { weeks: WeekData[] }) {
 
 // ─── Per-project section ──────────────────────────────────────────────────────────────────
 
-function ProjectWeeklySection({ project, token }: { project: QaseProject; token: string }) {
+function ProjectWeeklySection({
+  project,
+  token,
+  granularity,
+}: {
+  project: QaseProject;
+  token: string;
+  granularity: Granularity;
+}) {
   const total = project.counts.runs.total;
   const runsQuery = useAllRuns(token, project.code, '', total, total > 0);
   const usersQuery = useUsers(token);
@@ -498,8 +543,8 @@ function ProjectWeeklySection({ project, token }: { project: QaseProject; token:
 
   const weeks = useMemo(() => {
     if (!runsQuery.data) return [];
-    return buildWeeklyData(runsQuery.data, 20);
-  }, [runsQuery.data]);
+    return buildWeeklyData(runsQuery.data, granularity, 20);
+  }, [runsQuery.data, granularity]);
 
   const activeWeeks = weeks.filter((w) => w.total > 0);
 
@@ -539,16 +584,34 @@ function ProjectWeeklySection({ project, token }: { project: QaseProject; token:
 
 export function WeeklyRunReport({ projects, workspace }: Props) {
   const [selectedCode, setSelectedCode] = useState<string>(projects[0]?.code ?? '');
+  const [granularity, setGranularity] = useState<Granularity>('weekly');
   const selected = projects.find((p) => p.code === selectedCode) ?? projects[0];
 
   return (
     <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-      <div>
-        <h2 className="text-base font-semibold text-gray-900">Weekly Test Run Report</h2>
-        <p className="text-sm text-gray-400 mt-0.5">
-          Per-week breakdown of test execution — pass rates, failure trends, areas covered, and author activity.
-          Based on run start dates, most recent 500 runs.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Weekly Test Run Report</h2>
+          <p className="text-sm text-gray-400 mt-0.5">
+            Per-period breakdown of test execution — pass rates, failure trends, areas covered, and author activity.
+            Based on run start dates, most recent 500 runs.
+          </p>
+        </div>
+        {/* Granularity toggle */}
+        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
+          <button
+            onClick={() => setGranularity('weekly')}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${granularity === 'weekly' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Weekly
+          </button>
+          <button
+            onClick={() => setGranularity('biweekly')}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${granularity === 'biweekly' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Bi-weekly
+          </button>
+        </div>
       </div>
 
       {projects.length > 1 && (
@@ -579,6 +642,7 @@ export function WeeklyRunReport({ projects, workspace }: Props) {
           key={selected.code}
           project={selected}
           token={workspace.token}
+          granularity={granularity}
         />
       )}
     </div>
