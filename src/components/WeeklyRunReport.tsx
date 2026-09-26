@@ -1,11 +1,14 @@
 import { useState, useMemo } from 'react';
 import {
   Loader2, ChevronDown, TrendingUp, TrendingDown, Minus,
-  CheckCircle2, XCircle, AlertCircle, Clock, Users, Play, BarChart2,
+  CheckCircle2, XCircle, AlertCircle, Clock, Users, Play, BarChart2, Layers,
 } from 'lucide-react';
-import type { QaseProject, QaseRun, QaseUser, Workspace } from '../types/qase';
+import type { QaseProject, QaseRun, QaseResult, QaseUser, Workspace } from '../types/qase';
 import { useAllRuns } from '../hooks/useRuns';
 import { useUsers } from '../hooks/useUsers';
+import { usePeriodResults } from '../hooks/useResults';
+import { useProjectCaseMap } from '../hooks/useSuites';
+import { useAllMilestones } from '../hooks/useMilestones';
 
 interface Props {
   projects: QaseProject[];
@@ -26,7 +29,16 @@ interface WeekData {
   passRate: number;
   delta: number | null;
   analysis: string;
-  topAreas: string[];
+}
+
+interface SuiteStat {
+  name: string;
+  total: number;
+  passed: number;
+  failed: number;
+  blocked: number;
+  skipped: number;
+  passRate: number;
 }
 
 // ─── ISO week helpers (duplicated from AutomationReport to keep files independent) ────────
@@ -52,18 +64,100 @@ function weekLabel(weekKey: string): string {
   return `${fmt(monday)} – ${fmt(sunday)}, ${year}`;
 }
 
-// ─── Derive "areas" from run titles (common prefixes / keywords) ─────────────────────────
+// ─── Suite stats from results ─────────────────────────────────────────────────────────────
 
-function extractAreas(runs: QaseRun[]): string[] {
-  const titles = runs.map((r) => r.title.trim());
-  // Split on common separators and take the first segment as the "area"
-  const segments = titles.map((t) => t.split(/[-–|:]/)[0].trim()).filter(Boolean);
-  const freq = new Map<string, number>();
-  for (const s of segments) freq.set(s, (freq.get(s) ?? 0) + 1);
-  return [...freq.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([name]) => name);
+function buildSuiteStats(results: QaseResult[], caseToSuite: Map<number, string>): SuiteStat[] {
+  const map = new Map<string, { total: number; passed: number; failed: number; blocked: number; skipped: number }>();
+  for (const r of results) {
+    const name = r.case?.suite_title?.trim() || caseToSuite.get(r.case_id) || '(No suite)';
+    const entry = map.get(name) ?? { total: 0, passed: 0, failed: 0, blocked: 0, skipped: 0 };
+    entry.total += 1;
+    const s = r.status.toLowerCase();
+    if (s === 'passed') entry.passed += 1;
+    else if (s === 'failed') entry.failed += 1;
+    else if (s === 'blocked') entry.blocked += 1;
+    else if (s === 'skipped' || s === 'invalid') entry.skipped += 1;
+    map.set(name, entry);
+  }
+  return [...map.entries()]
+    .map(([name, s]) => ({
+      name,
+      ...s,
+      passRate: s.total > 0 ? (s.passed / s.total) * 100 : 0,
+    }))
+    .sort((a, b) => b.total - a.total);
+}
+
+// ─── Detailed suite-aware narrative ──────────────────────────────────────────────────────
+
+function generateDetailedAnalysis(week: WeekData, suites: SuiteStat[]): string {
+  if (suites.length === 0 || week.total === 0) return '';
+
+  const parts: string[] = [];
+  const totalResults = suites.reduce((s, x) => s + x.total, 0);
+
+  // Coverage breadth
+  const suiteNames = suites.slice(0, 5).map((s) => `"${s.name}"`);
+  const moreCount = suites.length > 5 ? suites.length - 5 : 0;
+  const suiteList = moreCount > 0
+    ? `${suiteNames.join(', ')}, and ${moreCount} more suite${moreCount !== 1 ? 's' : ''}`
+    : suiteNames.join(suiteNames.length > 1 ? ', and ' : '');
+  parts.push(
+    `This period covered ${suites.length} suite${suites.length !== 1 ? 's' : ''} across ${totalResults.toLocaleString()} test case execution${totalResults !== 1 ? 's' : ''} in ${week.runs.length} run${week.runs.length !== 1 ? 's' : ''}: ${suiteList}.`,
+  );
+
+  // Best performing suites
+  const topSuites = suites.filter((s) => s.total >= 3 && s.passRate === 100);
+  if (topSuites.length > 0) {
+    const names = topSuites.slice(0, 3).map((s) => `"${s.name}" (${s.total} cases)`).join(', ');
+    parts.push(`Full coverage with 100% pass rate in ${names}.`);
+  }
+
+  // Worst-performing suites (by pass rate, min 3 cases)
+  const failingSuites = suites
+    .filter((s) => s.total >= 3 && s.passRate < 70)
+    .sort((a, b) => a.passRate - b.passRate)
+    .slice(0, 3);
+  if (failingSuites.length > 0) {
+    const details = failingSuites.map((s) => {
+      const pct = s.passRate.toFixed(0);
+      return `"${s.name}" (${pct}% pass, ${s.failed} failed${s.blocked > 0 ? `, ${s.blocked} blocked` : ''})`;
+    }).join('; ');
+    parts.push(`Areas needing attention: ${details}.`);
+  }
+
+  // Suites with blocks
+  const blockedSuites = suites.filter((s) => s.blocked > 0).sort((a, b) => b.blocked - a.blocked).slice(0, 3);
+  if (blockedSuites.length > 0) {
+    const detail = blockedSuites.map((s) => `"${s.name}" (${s.blocked} blocked)`).join(', ');
+    parts.push(`Blocked test cases detected in ${detail} — dependencies or environment issues may be blocking progress.`);
+  }
+
+  // Skipped
+  const totalSkipped = suites.reduce((s, x) => s + x.skipped, 0);
+  const skipRate = totalResults > 0 ? totalSkipped / totalResults : 0;
+  if (skipRate > 0.1) {
+    const skippedSuites = suites.filter((s) => s.skipped > 0).sort((a, b) => b.skipped - a.skipped).slice(0, 2);
+    const detail = skippedSuites.map((s) => `"${s.name}" (${s.skipped})`).join(', ');
+    parts.push(`${(skipRate * 100).toFixed(0)}% of cases were skipped or invalid, mainly in ${detail}. Review whether these are intentional exclusions.`);
+  }
+
+  // Most tested suite
+  const mostTested = suites[0];
+  if (mostTested && mostTested.total > totalResults * 0.3) {
+    parts.push(`"${mostTested.name}" was the most exercised area, accounting for ${((mostTested.total / totalResults) * 100).toFixed(0)}% of all cases executed this period.`);
+  }
+
+  // Overall suite health summary
+  const healthySuites = suites.filter((s) => s.passRate >= 90).length;
+  const criticalSuites = suites.filter((s) => s.passRate < 70 && s.total >= 3).length;
+  if (suites.length >= 3) {
+    parts.push(
+      `Suite health: ${healthySuites} of ${suites.length} suites at ≥90% pass rate${criticalSuites > 0 ? `, ${criticalSuites} suite${criticalSuites !== 1 ? 's' : ''} below 70% requiring follow-up` : ''}.`,
+    );
+  }
+
+  return parts.join(' ');
 }
 
 // ─── Analysis text ────────────────────────────────────────────────────────────────────────
@@ -224,7 +318,6 @@ function buildWeeklyData(runs: QaseRun[], granularity: Granularity = 'weekly', p
         skipped: totals.skipped,
         isCurrentWeek: isCurrentPeriod,
       }),
-      topAreas: extractAreas(periodRuns),
     });
 
     if (totals.total > 0) prevPassRate = passRate;
@@ -377,8 +470,99 @@ function FailingRunsHighlight({ runs, users }: { runs: QaseRun[]; users: QaseUse
   );
 }
 
-function WeekSection({ week, users }: { week: WeekData; users: QaseUser[] }) {
+function SuiteCoverage({ suites, isLoading }: { suites: SuiteStat[]; isLoading: boolean }) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
+        <Loader2 size={12} className="animate-spin" /> Loading suite coverage…
+      </div>
+    );
+  }
+  if (suites.length === 0) return null;
+
+  const top = suites.slice(0, 15);
+  const hasFailed = top.some((s) => s.failed > 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-gray-400 border-b border-gray-100">
+              <th className="text-left pb-2 font-medium pr-4">Suite / Area</th>
+              <th className="text-right pb-2 font-medium px-2 w-16">Cases</th>
+              <th className="text-right pb-2 font-medium px-2 w-16">Pass %</th>
+              {hasFailed && <th className="text-right pb-2 font-medium px-2 w-16 text-red-400">Failed</th>}
+              {top.some((s) => s.blocked > 0) && <th className="text-right pb-2 font-medium px-2 w-16 text-orange-400">Blocked</th>}
+              <th className="pb-2 w-32 pl-4">Distribution</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {top.map((suite) => {
+              const passColor = suite.passRate >= 90 ? 'text-green-600'
+                : suite.passRate >= 70 ? 'text-yellow-600'
+                : 'text-red-500';
+              const pct = (n: number) => suite.total > 0 ? (n / suite.total) * 100 : 0;
+              return (
+                <tr key={suite.name} className="group">
+                  <td className="py-2 pr-4 text-gray-700 font-medium max-w-xs">
+                    <span className="truncate block" title={suite.name}>{suite.name}</span>
+                  </td>
+                  <td className="py-2 px-2 text-right text-gray-500">{suite.total.toLocaleString()}</td>
+                  <td className={`py-2 px-2 text-right font-semibold ${passColor}`}>
+                    {suite.total > 0 ? `${suite.passRate.toFixed(0)}%` : '—'}
+                  </td>
+                  {hasFailed && (
+                    <td className="py-2 px-2 text-right text-red-500">
+                      {suite.failed > 0 ? suite.failed.toLocaleString() : <span className="text-gray-200">—</span>}
+                    </td>
+                  )}
+                  {top.some((s) => s.blocked > 0) && (
+                    <td className="py-2 px-2 text-right text-orange-500">
+                      {suite.blocked > 0 ? suite.blocked.toLocaleString() : <span className="text-gray-200">—</span>}
+                    </td>
+                  )}
+                  <td className="py-2 pl-4">
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden flex w-28">
+                      <div className="bg-green-500 h-full" style={{ width: `${pct(suite.passed)}%` }} />
+                      <div className="bg-red-400 h-full" style={{ width: `${pct(suite.failed)}%` }} />
+                      <div className="bg-orange-400 h-full" style={{ width: `${pct(suite.blocked)}%` }} />
+                      <div className="bg-gray-300 h-full" style={{ width: `${pct(suite.skipped)}%` }} />
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {suites.length > 15 && (
+        <p className="text-xs text-gray-400">…and {suites.length - 15} more suites</p>
+      )}
+    </div>
+  );
+}
+
+function WeekSection({
+  week,
+  users,
+  token,
+  projectCode,
+  caseToSuite,
+}: {
+  week: WeekData;
+  users: QaseUser[];
+  token: string;
+  projectCode: string;
+  caseToSuite: Map<number, string>;
+}) {
   const [open, setOpen] = useState(false);
+
+  const resultsQuery = usePeriodResults(token, projectCode, week.runs, open && week.runs.length > 0);
+  const suiteStats = useMemo(
+    () => (resultsQuery.data ? buildSuiteStats(resultsQuery.data, caseToSuite) : []),
+    [resultsQuery.data, caseToSuite],
+  );
 
   const passRateColor = week.total === 0 ? 'text-gray-400'
     : week.passRate >= 90 ? 'text-green-600'
@@ -431,24 +615,43 @@ function WeekSection({ week, users }: { week: WeekData; users: QaseUser[] }) {
             />
           </div>
 
-          {/* Analysis */}
+          {/* Analysis — general stats-based summary */}
           <div className="px-5 py-3 bg-blue-50 border-l-4 border-blue-300">
+            <p className="text-xs font-semibold text-blue-600 mb-1 uppercase tracking-wide">Summary</p>
             <p className="text-xs text-blue-700 leading-relaxed">{week.analysis}</p>
           </div>
 
-          {/* Areas covered */}
-          {week.topAreas.length > 0 && (
-            <div className="px-5 py-3">
-              <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide flex items-center gap-1">
-                <BarChart2 size={11} /> Areas covered
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {week.topAreas.map((area) => (
-                  <span key={area} className="px-2 py-0.5 bg-violet-50 text-violet-700 rounded-full text-xs">{area}</span>
-                ))}
+          {/* Detailed suite-aware narrative — shown once results are loaded */}
+          {resultsQuery.isLoading && (
+            <div className="px-5 py-3 bg-indigo-50 border-l-4 border-indigo-200">
+              <div className="flex items-center gap-2 text-xs text-indigo-400">
+                <Loader2 size={11} className="animate-spin" /> Building detailed report…
               </div>
             </div>
           )}
+          {!resultsQuery.isLoading && suiteStats.length > 0 && (() => {
+            const narrative = generateDetailedAnalysis(week, suiteStats);
+            return narrative ? (
+              <div className="px-5 py-3 bg-indigo-50 border-l-4 border-indigo-300">
+                <p className="text-xs font-semibold text-indigo-600 mb-1 uppercase tracking-wide">Detailed Analysis</p>
+                <p className="text-xs text-indigo-800 leading-relaxed">{narrative}</p>
+              </div>
+            ) : null;
+          })()}
+
+          {/* Areas covered — suite breakdown from actual test results */}
+          <div className="px-5 py-3">
+            <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide flex items-center gap-1.5">
+              <Layers size={11} /> Areas covered
+              {resultsQuery.isFetching && <Loader2 size={10} className="animate-spin text-gray-300" />}
+              {resultsQuery.data && (
+                <span className="font-normal normal-case text-gray-400 ml-1">
+                  {resultsQuery.data.length.toLocaleString()} results · {suiteStats.length} suite{suiteStats.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </p>
+            <SuiteCoverage suites={suiteStats} isLoading={resultsQuery.isLoading} />
+          </div>
 
           {/* Failing runs highlight */}
           {week.runs.some((r) => r.stats.total > 0 && r.stats.passed / r.stats.total < 0.7) && (
@@ -533,23 +736,57 @@ function ProjectWeeklySection({
   token: string;
   granularity: Granularity;
 }) {
-  const total = project.counts.runs.total;
-  const runsQuery = useAllRuns(token, project.code, '', total, total > 0);
+  const [selectedMilestoneId, setSelectedMilestoneId] = useState<number | null>(null);
+
+  const totalRuns = project.counts.runs.total;
+  const totalCases = project.counts.cases;
+  const runsQuery = useAllRuns(token, project.code, '', totalRuns, totalRuns > 0);
   const usersQuery = useUsers(token);
+  const caseMapQuery = useProjectCaseMap(token, project.code, totalCases, totalCases > 0);
+  const milestonesQuery = useAllMilestones(token, project.code, true);
 
   const users = usersQuery.data?.result.entities ?? [];
+  const caseToSuite: Map<number, string> = caseMapQuery.data ?? new Map();
+  const milestones = useMemo(
+    () => [...(milestonesQuery.data ?? [])].sort((a, b) => {
+      const da = new Date(a.due_date ?? a.created_at).getTime();
+      const db = new Date(b.due_date ?? b.created_at).getTime();
+      return db - da; // most recent first
+    }),
+    [milestonesQuery.data],
+  );
   const isLoading = runsQuery.isLoading;
   const isFetching = runsQuery.isFetching && !runsQuery.isLoading;
 
   const weeks = useMemo(() => {
     if (!runsQuery.data) return [];
-    return buildWeeklyData(runsQuery.data, granularity, 20);
-  }, [runsQuery.data, granularity]);
+    const runs = selectedMilestoneId !== null
+      ? runsQuery.data.filter((r) => r.milestone_id === selectedMilestoneId)
+      : runsQuery.data;
+    return buildWeeklyData(runs, granularity, 20);
+  }, [runsQuery.data, granularity, selectedMilestoneId]);
 
   const activeWeeks = weeks.filter((w) => w.total > 0);
 
   return (
     <div className="space-y-4">
+      {/* Milestone filter */}
+      {milestones.length > 0 && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400 font-medium flex-shrink-0">Milestone:</span>
+          <select
+            value={selectedMilestoneId ?? ''}
+            onChange={(e) => setSelectedMilestoneId(e.target.value === '' ? null : Number(e.target.value))}
+            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent cursor-pointer"
+          >
+            <option value="">All runs</option>
+            {milestones.map((m) => (
+              <option key={m.id} value={m.id}>{m.title}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {isFetching && (
         <div className="flex items-center gap-2 text-xs text-gray-400">
           <Loader2 size={12} className="animate-spin" /> Updating…
@@ -563,7 +800,11 @@ function ProjectWeeklySection({
       )}
 
       {!isLoading && activeWeeks.length === 0 && (
-        <p className="text-center text-gray-400 py-12 text-sm">No test runs with start dates found for this project.</p>
+        <p className="text-center text-gray-400 py-12 text-sm">
+          {selectedMilestoneId !== null
+            ? 'No test runs found for the selected milestone.'
+            : 'No test runs with start dates found for this project.'}
+        </p>
       )}
 
       {!isLoading && activeWeeks.length > 0 && (
@@ -571,7 +812,14 @@ function ProjectWeeklySection({
           <SummaryStats weeks={weeks} />
           <div className="space-y-3">
             {weeks.map((week) => (
-              <WeekSection key={week.weekKey} week={week} users={users} />
+              <WeekSection
+                key={week.weekKey}
+                week={week}
+                users={users}
+                token={token}
+                projectCode={project.code}
+                caseToSuite={caseToSuite}
+              />
             ))}
           </div>
         </>

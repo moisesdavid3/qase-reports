@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Bot, Wrench, Clock } from 'lucide-react';
+import { Loader2, TrendingUp, TrendingDown, Minus, Bot, Wrench, Clock } from 'lucide-react';
 import type { QaseProject, Workspace, QaseCase } from '../types/qase';
 import { useCasesTotal, useAllCases } from '../hooks/useCases';
 

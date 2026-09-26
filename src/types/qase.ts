@@ -44,6 +44,7 @@ export interface QaseRun {
   start_time: string | null;
   end_time: string | null;
   user_id: number;
+  milestone_id: number | null;
   stats: {
     total: number;
     passed: number;
@@ -54,6 +55,25 @@ export interface QaseRun {
     in_progress: number;
     invalid: number;
     untested: number;
+  };
+}
+
+export interface QaseMilestone {
+  id: number;
+  title: string;
+  status: string;
+  description: string | null;
+  due_date: string | null;
+  created_at: string;
+}
+
+export interface QaseMilestonesResponse {
+  status: boolean;
+  result: {
+    total: number;
+    filtered: number;
+    count: number;
+    entities: QaseMilestone[];
   };
 }
 
@@ -96,9 +116,26 @@ export interface QaseProjectsResponse {
 
 export interface QaseCase {
   id: number;
+  suite_id: number | null;
   automation: 0 | 1 | 2; // 0 = manual, 1 = to_be_automated, 2 = automated
   created_at: string;
   updated_at: string;
+}
+
+export interface QaseSuite {
+  id: number;
+  title: string;
+  parent_id: number | null;
+}
+
+export interface QaseSuitesResponse {
+  status: boolean;
+  result: {
+    total: number;
+    filtered: number;
+    count: number;
+    entities: QaseSuite[];
+  };
 }
 
 export interface QaseCasesResponse {
@@ -108,5 +145,27 @@ export interface QaseCasesResponse {
     filtered: number;
     count: number;
     entities: QaseCase[];
+  };
+}
+
+export interface QaseResult {
+  id: string;
+  status: string; // 'passed' | 'failed' | 'blocked' | 'skipped' | 'invalid' | ...
+  time_ms: number | null;
+  case_id: number;
+  run_id: number;
+  case: {
+    title: string;
+    suite_title: string | null;
+  } | null;
+}
+
+export interface QaseResultsResponse {
+  status: boolean;
+  result: {
+    total: number;
+    filtered: number;
+    count: number;
+    entities: QaseResult[];
   };
 }
