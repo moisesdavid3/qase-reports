@@ -17,11 +17,25 @@ interface PersistedState {
 }
 
 function loadState(): PersistedState {
+  const defaults: PersistedState = { view: 'select', selectedCodes: [], workspaceId: WORKSPACES[0].id, reportProjects: [] };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as PersistedState;
-  } catch {}
-  return { view: 'select', selectedCodes: [], workspaceId: WORKSPACES[0].id, reportProjects: [] };
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw) as PersistedState;
+    // Validate shape — if anything looks wrong, reset to defaults
+    if (
+      typeof parsed !== 'object' ||
+      !Array.isArray(parsed.selectedCodes) ||
+      !Array.isArray(parsed.reportProjects)
+    ) {
+      localStorage.removeItem(STORAGE_KEY);
+      return defaults;
+    }
+    return parsed;
+  } catch {
+    localStorage.removeItem(STORAGE_KEY);
+    return defaults;
+  }
 }
 
 function saveState(state: PersistedState) {
