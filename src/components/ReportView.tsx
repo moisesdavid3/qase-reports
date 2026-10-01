@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft, CheckSquare, Layers, Milestone, Play, Bug,
-  ChevronDown, Loader2, AlertCircle, Search, ChevronLeft, ChevronRight, X, Download, Bot, CalendarDays,
+  ChevronDown, Loader2, AlertCircle, Search, ChevronLeft, ChevronRight, X, Download, Bot, CalendarDays, Activity,
 } from 'lucide-react';
 import type { QaseProject, Workspace } from '../types/qase';
 import { useRuns, useRunsTotal, useAllRuns, PAGE_SIZE } from '../hooks/useRuns';
@@ -10,6 +10,7 @@ import { useUsers } from '../hooks/useUsers';
 import { exportCSV, exportXLSX } from '../utils/exportRuns';
 import { AutomationReport } from './AutomationReport';
 import { WeeklyRunReport } from './WeeklyRunReport';
+import { TrendsReport } from './TrendsReport';
 
 interface Props {
   projects: QaseProject[];
@@ -17,7 +18,7 @@ interface Props {
   onBack: () => void;
 }
 
-type Tab = 'overview' | 'automation' | 'weekly';
+type Tab = 'overview' | 'automation' | 'weekly' | 'trends';
 
 export function ReportView({ projects, workspace, onBack }: Props) {
   const [tab, setTab] = useState<Tab>('overview');
@@ -67,6 +68,13 @@ export function ReportView({ projects, workspace, onBack }: Props) {
             <CalendarDays size={13} />
             Weekly
           </button>
+          <button
+            onClick={() => setTab('trends')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === 'trends' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <Activity size={13} />
+            Trends
+          </button>
         </div>
       </div>
 
@@ -76,6 +84,10 @@ export function ReportView({ projects, workspace, onBack }: Props) {
 
       {tab === 'weekly' && (
         <WeeklyRunReport projects={projects} workspace={workspace} />
+      )}
+
+      {tab === 'trends' && (
+        <TrendsReport projects={projects} workspace={workspace} />
       )}
 
       {tab === 'overview' && (

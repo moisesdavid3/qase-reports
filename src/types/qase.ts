@@ -169,3 +169,23 @@ export interface QaseResultsResponse {
     entities: QaseResult[];
   };
 }
+
+export interface QaseDefect {
+  id: number;
+  title: string;
+  status: string; // 'open' | 'resolved' | 'in_progress' | 'invalid'
+  severity: string | number | null;
+  created_at: string;
+  updated_at: string;
+  resolved: string | null;
+}
+
+export interface QaseDefectsResponse {
+  status: boolean;
+  result: {
+    total: number;
+    filtered: number;
+    count: number;
+    entities: QaseDefect[];
+  };
+}
