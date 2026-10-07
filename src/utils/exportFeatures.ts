@@ -1,6 +1,9 @@
 import * as XLSX from 'xlsx';
 import type { QaseRun, QaseUser } from '../types/qase';
 import type { FeatureGroup } from '../components/FeaturesReport';
+import type { JiraIssueInfo } from '../hooks/useJiraIssues';
+
+type JiraMap = Record<string, JiraIssueInfo>;
 
 type Row = Record<string, string | number>;
 
@@ -17,9 +20,12 @@ function fmt(d: Date | null): string {
   return d ? d.toISOString().slice(0, 10) : '';
 }
 
-function featureRows(groups: FeatureGroup[]): Row[] {
+function featureRows(groups: FeatureGroup[], jira: JiraMap): Row[] {
   return groups.map((g) => ({
     'External Issue': safe(g.key),
+    'Title': safe(jira[g.key]?.summary ?? ''),
+    'Issue Type': jira[g.key]?.type ?? '',
+    'Jira Status': jira[g.key]?.status ?? '',
     'Jira Link': g.issue?.link ?? '',
     'Status': g.open ? 'In progress' : 'Completed',
     'Runs': g.runs.length,
@@ -37,11 +43,12 @@ function featureRows(groups: FeatureGroup[]): Row[] {
   }));
 }
 
-function runRows(groups: FeatureGroup[], ungrouped: QaseRun[], users: QaseUser[]): Row[] {
+function runRows(groups: FeatureGroup[], ungrouped: QaseRun[], users: QaseUser[], jira: JiraMap): Row[] {
   const toRow = (r: QaseRun, feature: string, link: string): Row => {
     const executed = r.stats.passed + r.stats.failed + r.stats.blocked + r.stats.skipped;
     return {
       'External Issue': safe(feature),
+      'Title': safe(jira[feature]?.summary ?? ''),
       'Jira Link': link,
       'Run': safe(r.title),
       'Run Status': r.status_text,
@@ -72,8 +79,8 @@ function download(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function exportFeaturesCSV(groups: FeatureGroup[], ungrouped: QaseRun[], users: QaseUser[], filename: string) {
-  const rows = runRows(groups, ungrouped, users);
+export function exportFeaturesCSV(groups: FeatureGroup[], ungrouped: QaseRun[], users: QaseUser[], filename: string, jira: JiraMap = {}) {
+  const rows = runRows(groups, ungrouped, users, jira);
   if (rows.length === 0) return;
   const headers = Object.keys(rows[0]);
   const esc = (v: string | number) => {
@@ -84,9 +91,9 @@ export function exportFeaturesCSV(groups: FeatureGroup[], ungrouped: QaseRun[], 
   download(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' }), `${filename}.csv`);
 }
 
-export function exportFeaturesXLSX(groups: FeatureGroup[], ungrouped: QaseRun[], users: QaseUser[], filename: string) {
+export function exportFeaturesXLSX(groups: FeatureGroup[], ungrouped: QaseRun[], users: QaseUser[], filename: string, jira: JiraMap = {}) {
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(featureRows(groups)), 'Features');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(runRows(groups, ungrouped, users)), 'Test Runs');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(featureRows(groups, jira)), 'Features');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(runRows(groups, ungrouped, users, jira)), 'Test Runs');
   XLSX.writeFile(wb, `${filename}.xlsx`);
 }

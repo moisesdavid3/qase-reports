@@ -4,6 +4,7 @@ import type { QaseProject, QaseRun, QaseUser, Workspace } from '../types/qase';
 import { useAllRuns } from '../hooks/useRuns';
 import { useUsers } from '../hooks/useUsers';
 import { useAllMilestones } from '../hooks/useMilestones';
+import { useJiraIssues, type JiraIssueInfo } from '../hooks/useJiraIssues';
 import { ExternalIssueLink } from './ExternalIssueLink';
 import { exportFeaturesCSV, exportFeaturesXLSX } from '../utils/exportFeatures';
 
@@ -189,7 +190,7 @@ function RunsTable({ runs, users }: { runs: QaseRun[]; users: QaseUser[] }) {
   );
 }
 
-function FeatureCard({ group, users }: { group: FeatureGroup; users: QaseUser[] }) {
+function FeatureCard({ group, users, jira }: { group: FeatureGroup; users: QaseUser[]; jira?: JiraIssueInfo }) {
   const [open, setOpen] = useState(false);
   const pct = (n: number) => (group.total > 0 ? `${(n / group.total) * 100}%` : '0%');
 
@@ -202,8 +203,13 @@ function FeatureCard({ group, users }: { group: FeatureGroup; users: QaseUser[] 
         <div className="flex-1 min-w-0 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
             <ExternalIssueLink issue={group.issue} />
+            {jira?.summary && (
+              <span className="text-sm font-semibold text-gray-900 truncate max-w-xl" title={jira.summary}>{jira.summary}</span>
+            )}
+            {jira?.type && <span className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{jira.type}</span>}
+            {jira?.status && <span className="text-xs text-gray-500 border border-gray-200 px-1.5 py-0.5 rounded">{jira.status}</span>}
             {group.open && (
-              <span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full font-medium">In progress</span>
+              <span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full font-medium">Testing in progress</span>
             )}
             <span className="text-xs text-gray-400">
               {group.runs.length} run{group.runs.length !== 1 ? 's' : ''} · {fmtDate(group.lastStart)}
@@ -256,6 +262,13 @@ function ProjectFeaturesSection({ project, token }: { project: QaseProject; toke
     [milestonesQuery.data],
   );
 
+  const issueKeys = useMemo(
+    () => [...new Set((runsQuery.data ?? []).map((r) => r.external_issue?.id).filter((k): k is string => !!k))],
+    [runsQuery.data],
+  );
+  const jiraQuery = useJiraIssues(issueKeys);
+  const jira = jiraQuery.data ?? {};
+
   const { groups, ungrouped, runCount } = useMemo(() => {
     let runs = runsQuery.data ?? [];
     const title = milestones.find((m) => m.id === milestoneId)?.title;
@@ -263,10 +276,13 @@ function ProjectFeaturesSection({ project, token }: { project: QaseProject; toke
     const q = search.trim().toLowerCase();
     const res = groupRuns(runs);
     const groups = q
-      ? res.groups.filter((g) => g.key.toLowerCase().includes(q) || g.runs.some((r) => r.title.toLowerCase().includes(q)))
+      ? res.groups.filter((g) =>
+          g.key.toLowerCase().includes(q) ||
+          (jira[g.key]?.summary ?? '').toLowerCase().includes(q) ||
+          g.runs.some((r) => r.title.toLowerCase().includes(q)))
       : res.groups;
     return { groups, ungrouped: res.ungrouped, runCount: runs.length };
-  }, [runsQuery.data, milestoneId, milestones, search]);
+  }, [runsQuery.data, milestoneId, milestones, search, jiraQuery.data]);
 
   const linkedRuns = groups.reduce((s, g) => s + g.runs.length, 0);
   const totals = groups.reduce(
@@ -296,13 +312,13 @@ function ProjectFeaturesSection({ project, token }: { project: QaseProject; toke
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search issue or run…"
+            placeholder="Search issue, title or run…"
             className="pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400 w-56"
           />
         </div>
         <div className="ml-auto flex items-center gap-1">
           <button
-            onClick={() => exportFeaturesCSV(groups, ungrouped, users, `${project.code}-features`)}
+            onClick={() => exportFeaturesCSV(groups, ungrouped, users, `${project.code}-features`, jira)}
             disabled={groups.length === 0}
             title="Download CSV (one row per run)"
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -310,7 +326,7 @@ function ProjectFeaturesSection({ project, token }: { project: QaseProject; toke
             <Download size={13} /> CSV
           </button>
           <button
-            onClick={() => exportFeaturesXLSX(groups, ungrouped, users, `${project.code}-features`)}
+            onClick={() => exportFeaturesXLSX(groups, ungrouped, users, `${project.code}-features`, jira)}
             disabled={groups.length === 0}
             title="Download XLSX (Features + Test Runs sheets)"
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -319,6 +335,12 @@ function ProjectFeaturesSection({ project, token }: { project: QaseProject; toke
           </button>
         </div>
       </div>
+
+      {jiraQuery.isError && (
+        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Jira ticket titles are unavailable (the Jira connection is not configured or failed). Showing issue IDs only.
+        </p>
+      )}
 
       {runsQuery.isLoading && (
         <div className="flex items-center justify-center gap-2 py-16 text-gray-400 text-sm">
@@ -349,7 +371,7 @@ function ProjectFeaturesSection({ project, token }: { project: QaseProject; toke
             </p>
           ) : (
             <div className="space-y-3">
-              {groups.map((g) => <FeatureCard key={g.key} group={g} users={users} />)}
+              {groups.map((g) => <FeatureCard key={g.key} group={g} users={users} jira={jira[g.key]} />)}
             </div>
           )}
 
