@@ -26,7 +26,7 @@ export async function fetchRuns(
   search = '',
 ): Promise<QaseRunsResponse> {
   const { data } = await createClient(token).get<QaseRunsResponse>(`/run/${projectCode}`, {
-    params: { limit, offset, ...(search ? { search } : {}) },
+    params: { limit, offset, include: 'external_issue', ...(search ? { search } : {}) },
   });
   return data;
 }

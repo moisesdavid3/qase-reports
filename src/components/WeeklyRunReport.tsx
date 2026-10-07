@@ -7,6 +7,7 @@ import type { QaseProject, QaseRun, QaseResult, QaseUser, Workspace } from '../t
 import { useAllRuns } from '../hooks/useRuns';
 import { useUsers } from '../hooks/useUsers';
 import { usePeriodResults } from '../hooks/useResults';
+import { ExternalIssueLink } from './ExternalIssueLink';
 import { useProjectCaseMap } from '../hooks/useSuites';
 import { useAllMilestones } from '../hooks/useMilestones';
 
@@ -388,7 +389,10 @@ function RunRow({ run, users }: { run: QaseRun; users: QaseUser[] }) {
       <Icon size={15} className={`mt-0.5 flex-shrink-0 ${iconColor}`} />
       <div className="flex-1 min-w-0">
         <p className="text-sm text-gray-800 leading-snug truncate" title={run.title}>{run.title}</p>
-        {author && <p className="text-xs text-gray-400 mt-0.5">by {author.name}</p>}
+        <div className="flex items-center gap-2 mt-0.5">
+          {author && <span className="text-xs text-gray-400">by {author.name}</span>}
+          <ExternalIssueLink issue={run.external_issue} />
+        </div>
       </div>
       <div className="flex items-center gap-3 flex-shrink-0 text-right">
         {passRate !== null && (
@@ -760,11 +764,20 @@ function ProjectWeeklySection({
 
   const weeks = useMemo(() => {
     if (!runsQuery.data) return [];
-    const runs = selectedMilestoneId !== null
-      ? runsQuery.data.filter((r) => r.milestone_id === selectedMilestoneId)
+    const milestoneTitle = milestones.find((m) => m.id === selectedMilestoneId)?.title;
+    const runs = milestoneTitle !== undefined
+      ? runsQuery.data.filter((r) => r.milestone?.title === milestoneTitle)
       : runsQuery.data;
-    return buildWeeklyData(runs, granularity, 20);
-  }, [runsQuery.data, granularity, selectedMilestoneId]);
+    if (milestoneTitle === undefined) return buildWeeklyData(runs, granularity, 20);
+
+    // A milestone can span older runs than the default window: widen the range to cover them.
+    const starts = runs.map((r) => (r.start_time ? new Date(r.start_time).getTime() : NaN)).filter((t) => !isNaN(t));
+    if (starts.length === 0) return [];
+    const weeksSpan = Math.ceil((Date.now() - Math.min(...starts)) / (7 * 86400000)) + 1;
+    const step = granularity === 'biweekly' ? 2 : 1;
+    const periodsBack = Math.min(Math.max(20, Math.ceil(weeksSpan / step)), 150);
+    return buildWeeklyData(runs, granularity, periodsBack).filter((w) => w.runs.length > 0);
+  }, [runsQuery.data, granularity, selectedMilestoneId, milestones]);
 
   const activeWeeks = weeks.filter((w) => w.total > 0);
 

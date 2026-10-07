@@ -36,6 +36,12 @@ export interface QaseProject {
   };
 }
 
+export interface QaseExternalIssue {
+  id: string;
+  type: string;
+  link: string | null;
+}
+
 export interface QaseRun {
   id: number;
   title: string;
@@ -44,7 +50,9 @@ export interface QaseRun {
   start_time: string | null;
   end_time: string | null;
   user_id: number;
-  milestone_id: number | null;
+  milestone: { title: string; description: string | null } | null;
+  external_issue?: QaseExternalIssue | null;
+  environment?: { title: string } | null;
   stats: {
     total: number;
     passed: number;

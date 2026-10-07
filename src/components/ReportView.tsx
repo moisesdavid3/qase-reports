@@ -11,6 +11,8 @@ import { exportCSV, exportXLSX } from '../utils/exportRuns';
 import { AutomationReport } from './AutomationReport';
 import { WeeklyRunReport } from './WeeklyRunReport';
 import { TrendsReport } from './TrendsReport';
+import { FeaturesReport } from './FeaturesReport';
+import { ExternalIssueLink } from './ExternalIssueLink';
 
 interface Props {
   projects: QaseProject[];
@@ -18,7 +20,7 @@ interface Props {
   onBack: () => void;
 }
 
-type Tab = 'overview' | 'automation' | 'weekly' | 'trends';
+type Tab = 'overview' | 'automation' | 'weekly' | 'trends' | 'features';
 
 export function ReportView({ projects, workspace, onBack }: Props) {
   const [tab, setTab] = useState<Tab>('overview');
@@ -75,6 +77,13 @@ export function ReportView({ projects, workspace, onBack }: Props) {
             <Activity size={13} />
             Trends
           </button>
+          <button
+            onClick={() => setTab('features')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === 'features' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <Layers size={13} />
+            Features
+          </button>
         </div>
       </div>
 
@@ -88,6 +97,10 @@ export function ReportView({ projects, workspace, onBack }: Props) {
 
       {tab === 'trends' && (
         <TrendsReport projects={projects} workspace={workspace} />
+      )}
+
+      {tab === 'features' && (
+        <FeaturesReport projects={projects} workspace={workspace} />
       )}
 
       {tab === 'overview' && (
@@ -526,11 +539,14 @@ function ProjectRunsSection({ project, token }: { project: QaseProject; token: s
                       <tr key={run.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-3 py-2.5 min-w-0">
                           <div className="font-medium text-gray-900 truncate">{run.title}</div>
-                          {run.start_time && (
-                            <div className="text-xs text-gray-400 mt-0.5">
-                              {new Date(run.start_time).toLocaleDateString()}
-                            </div>
-                          )}
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {run.start_time && (
+                              <span className="text-xs text-gray-400">
+                                {new Date(run.start_time).toLocaleDateString()}
+                              </span>
+                            )}
+                            <ExternalIssueLink issue={run.external_issue} />
+                          </div>
                         </td>
                         <td className="px-2 py-2.5"><StatusBadge status={run.status_text} /></td>
                         <td className="px-2 py-2.5 text-sm text-gray-600 truncate">
