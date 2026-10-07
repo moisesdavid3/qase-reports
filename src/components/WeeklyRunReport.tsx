@@ -245,9 +245,102 @@ function periodLabel(weekKeys: string[]): string {
   return `${fmt(start)} – ${fmt(endSunday)}, ${year}`;
 }
 
-type Granularity = 'weekly' | 'biweekly';
+type Granularity = 'weekly' | 'biweekly' | 'custom';
 
-function buildWeeklyData(runs: QaseRun[], granularity: Granularity = 'weekly', periodsBack = 20): WeekData[] {
+interface DateRange {
+  from: string; // YYYY-MM-DD (local)
+  to: string;
+}
+
+function parseLocalDate(s: string, endOfDay = false): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return endOfDay ? new Date(y, m - 1, d, 23, 59, 59, 999) : new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
+function toInputDate(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+function lastDaysRange(days: number): DateRange {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(to.getDate() - (days - 1));
+  return { from: toInputDate(from), to: toInputDate(to) };
+}
+
+function sumStats(runs: QaseRun[]) {
+  return runs.reduce(
+    (acc, r) => ({
+      total: acc.total + r.stats.total,
+      passed: acc.passed + r.stats.passed,
+      failed: acc.failed + r.stats.failed,
+      blocked: acc.blocked + r.stats.blocked,
+      skipped: acc.skipped + r.stats.skipped,
+      invalid: acc.invalid + r.stats.invalid,
+    }),
+    { total: 0, passed: 0, failed: 0, blocked: 0, skipped: 0, invalid: 0 },
+  );
+}
+
+function runsBetween(runs: QaseRun[], start: Date, end: Date): QaseRun[] {
+  return runs.filter((r) => {
+    if (!r.start_time) return false;
+    const t = new Date(r.start_time).getTime();
+    return t >= start.getTime() && t <= end.getTime();
+  });
+}
+
+// A single period covering the user's range; delta is measured against the equally long range just before it.
+function buildCustomData(runs: QaseRun[], range: DateRange): WeekData[] {
+  const start = parseLocalDate(range.from);
+  const end = parseLocalDate(range.to, true);
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) return [];
+
+  const periodRuns = runsBetween(runs, start, end);
+  const totals = sumStats(periodRuns);
+  const passRate = totals.total > 0 ? (totals.passed / totals.total) * 100 : 0;
+
+  const spanMs = end.getTime() - start.getTime() + 1;
+  const prevEnd = new Date(start.getTime() - 1);
+  const prevStart = new Date(start.getTime() - spanMs);
+  const prevTotals = sumStats(runsBetween(runs, prevStart, prevEnd));
+  const delta = totals.total > 0 && prevTotals.total > 0
+    ? passRate - (prevTotals.passed / prevTotals.total) * 100
+    : null;
+
+  const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const now = Date.now();
+  const isCurrent = start.getTime() <= now && now <= end.getTime();
+
+  return [{
+    weekKey: `custom-${range.from}-${range.to}`,
+    label: `${fmt(start)} – ${fmt(end)}`,
+    isCurrentWeek: isCurrent,
+    runs: periodRuns,
+    ...totals,
+    passRate,
+    delta,
+    analysis: generateWeekAnalysis({
+      runs: periodRuns,
+      passRate,
+      delta,
+      total: totals.total,
+      failed: totals.failed,
+      blocked: totals.blocked,
+      skipped: totals.skipped,
+      isCurrentWeek: isCurrent,
+    })
+      .replace('(Week in progress.)', '(Period in progress.)')
+      .replace('Baseline week', 'Baseline period')
+      .replace('Stable week', 'Stable period')
+      .replace('recorded this week', 'recorded in this period')
+      .replace(/^(Significant improvement|Steady improvement|Slight regression|Notable regression) \(([^)]*)pp\)/, '$1 ($2pp vs previous period)'),
+  }];
+}
+
+function buildWeeklyData(runs: QaseRun[], granularity: 'weekly' | 'biweekly' = 'weekly', periodsBack = 20): WeekData[] {
   const byWeek = new Map<string, QaseRun[]>();
   for (const run of runs) {
     if (!run.start_time) continue;
@@ -553,14 +646,16 @@ function WeekSection({
   token,
   projectCode,
   caseToSuite,
+  defaultOpen = false,
 }: {
+  defaultOpen?: boolean;
   week: WeekData;
   users: QaseUser[];
   token: string;
   projectCode: string;
   caseToSuite: Map<number, string>;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
 
   const resultsQuery = usePeriodResults(token, projectCode, week.runs, open && week.runs.length > 0);
   const suiteStats = useMemo(
@@ -714,9 +809,9 @@ function SummaryStats({ weeks }: { weeks: WeekData[] }) {
   return (
     <div className="grid grid-cols-4 gap-4">
       {[
-        { label: 'Total runs', value: totalRuns.toLocaleString(), sub: `last ${activeWeeks.length} periods`, icon: <Play size={14} /> },
+        { label: 'Total runs', value: totalRuns.toLocaleString(), sub: activeWeeks.length === 1 ? 'in the selected period' : `last ${activeWeeks.length} periods`, icon: <Play size={14} /> },
         { label: 'Total cases executed', value: totalCases.toLocaleString(), sub: 'across all runs', icon: <CheckCircle2 size={14} /> },
-        { label: 'Avg pass rate', value: `${avgPassRate.toFixed(1)}%`, sub: trend !== null ? `${trend > 0 ? '↑' : trend < 0 ? '↓' : '→'} avg ${Math.abs(trend).toFixed(1)}pp/week` : 'no trend data', icon: <BarChart2 size={14} /> },
+        { label: 'Avg pass rate', value: `${avgPassRate.toFixed(1)}%`, sub: activeWeeks.length === 1 ? (activeWeeks[0].delta !== null ? `${activeWeeks[0].delta > 0 ? '↑' : activeWeeks[0].delta < 0 ? '↓' : '→'} ${Math.abs(activeWeeks[0].delta).toFixed(1)}pp vs previous period` : 'no previous period data') : trend !== null ? `${trend > 0 ? '↑' : trend < 0 ? '↓' : '→'} avg ${Math.abs(trend).toFixed(1)}pp/week` : 'no trend data', icon: <BarChart2 size={14} /> },
         { label: 'Total failed', value: totalFailed.toLocaleString(), sub: `${totalCases > 0 ? ((totalFailed / totalCases) * 100).toFixed(1) : 0}% of all cases`, icon: <XCircle size={14} /> },
       ].map(({ label, value, sub, icon }) => (
         <div key={label} className="rounded-xl border border-gray-200 px-4 py-3 flex flex-col gap-1">
@@ -735,10 +830,12 @@ function ProjectWeeklySection({
   project,
   token,
   granularity,
+  customRange,
 }: {
   project: QaseProject;
   token: string;
   granularity: Granularity;
+  customRange: DateRange;
 }) {
   const [selectedMilestoneId, setSelectedMilestoneId] = useState<number | null>(null);
 
@@ -768,6 +865,7 @@ function ProjectWeeklySection({
     const runs = milestoneTitle !== undefined
       ? runsQuery.data.filter((r) => r.milestone?.title === milestoneTitle)
       : runsQuery.data;
+    if (granularity === 'custom') return buildCustomData(runs, customRange);
     if (milestoneTitle === undefined) return buildWeeklyData(runs, granularity, 20);
 
     // A milestone can span older runs than the default window: widen the range to cover them.
@@ -777,9 +875,17 @@ function ProjectWeeklySection({
     const step = granularity === 'biweekly' ? 2 : 1;
     const periodsBack = Math.min(Math.max(20, Math.ceil(weeksSpan / step)), 150);
     return buildWeeklyData(runs, granularity, periodsBack).filter((w) => w.runs.length > 0);
-  }, [runsQuery.data, granularity, selectedMilestoneId, milestones]);
+  }, [runsQuery.data, granularity, selectedMilestoneId, milestones, customRange]);
 
   const activeWeeks = weeks.filter((w) => w.total > 0);
+
+  const rangeInvalid = granularity === 'custom' && parseLocalDate(customRange.to, true) < parseLocalDate(customRange.from);
+  const oldestLoaded = useMemo(() => {
+    const ts = (runsQuery.data ?? []).map((r) => (r.start_time ? new Date(r.start_time).getTime() : NaN)).filter((t) => !isNaN(t));
+    return ts.length ? Math.min(...ts) : null;
+  }, [runsQuery.data]);
+  const rangeTruncated = granularity === 'custom' && !rangeInvalid && oldestLoaded !== null
+    && totalRuns > (runsQuery.data?.length ?? 0) && parseLocalDate(customRange.from).getTime() < oldestLoaded;
 
   return (
     <div className="space-y-4">
@@ -800,6 +906,18 @@ function ProjectWeeklySection({
         </div>
       )}
 
+      {rangeInvalid && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          The end date must be on or after the start date.
+        </p>
+      )}
+      {rangeTruncated && oldestLoaded !== null && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Only the most recent {runsQuery.data?.length} runs are loaded (back to {new Date(oldestLoaded).toLocaleDateString()}),
+          so the part of the range before that date may be incomplete.
+        </p>
+      )}
+
       {isFetching && (
         <div className="flex items-center gap-2 text-xs text-gray-400">
           <Loader2 size={12} className="animate-spin" /> Updating…
@@ -814,7 +932,9 @@ function ProjectWeeklySection({
 
       {!isLoading && activeWeeks.length === 0 && (
         <p className="text-center text-gray-400 py-12 text-sm">
-          {selectedMilestoneId !== null
+          {granularity === 'custom'
+            ? 'No test runs started within the selected date range.'
+            : selectedMilestoneId !== null
             ? 'No test runs found for the selected milestone.'
             : 'No test runs with start dates found for this project.'}
         </p>
@@ -832,6 +952,7 @@ function ProjectWeeklySection({
                 token={token}
                 projectCode={project.code}
                 caseToSuite={caseToSuite}
+                defaultOpen={granularity === 'custom'}
               />
             ))}
           </div>
@@ -846,6 +967,7 @@ function ProjectWeeklySection({
 export function WeeklyRunReport({ projects, workspace }: Props) {
   const [selectedCode, setSelectedCode] = useState<string>(projects[0]?.code ?? '');
   const [granularity, setGranularity] = useState<Granularity>('weekly');
+  const [customRange, setCustomRange] = useState<DateRange>(() => lastDaysRange(30));
   const selected = projects.find((p) => p.code === selectedCode) ?? projects[0];
 
   return (
@@ -872,8 +994,50 @@ export function WeeklyRunReport({ projects, workspace }: Props) {
           >
             Bi-weekly
           </button>
+          <button
+            onClick={() => setGranularity('custom')}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${granularity === 'custom' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Custom
+          </button>
         </div>
       </div>
+
+      {granularity === 'custom' && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="flex items-center gap-2 text-xs text-gray-400 font-medium">
+            From
+            <input
+              type="date"
+              value={customRange.from}
+              max={customRange.to || undefined}
+              onChange={(e) => e.target.value && setCustomRange((r) => ({ ...r, from: e.target.value }))}
+              className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-400"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-400 font-medium">
+            To
+            <input
+              type="date"
+              value={customRange.to}
+              min={customRange.from || undefined}
+              onChange={(e) => e.target.value && setCustomRange((r) => ({ ...r, to: e.target.value }))}
+              className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-400"
+            />
+          </label>
+          <div className="flex items-center gap-1">
+            {[7, 14, 30, 90].map((d) => (
+              <button
+                key={d}
+                onClick={() => setCustomRange(lastDaysRange(d))}
+                className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Last {d}d
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {projects.length > 1 && (
         <div className="flex flex-wrap gap-2">
@@ -904,6 +1068,7 @@ export function WeeklyRunReport({ projects, workspace }: Props) {
           project={selected}
           token={workspace.token}
           granularity={granularity}
+          customRange={customRange}
         />
       )}
     </div>
