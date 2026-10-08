@@ -116,7 +116,6 @@ function Delta({ value, suffix }: { value: number | null; suffix: string }) {
 
 function ExecutionTrendTable({ runs }: { runs: QaseRun[] }) {
   const rows = useMemo(() => buildTrend(runs), [runs]);
-  const maxCases = Math.max(1, ...rows.map((r) => r.cases));
 
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200">
@@ -132,7 +131,6 @@ function ExecutionTrendTable({ runs }: { runs: QaseRun[] }) {
             <th className="text-right font-medium px-3 py-2.5">Blocked</th>
             <th className="text-right font-medium px-3 py-2.5">Pass rate</th>
             <th className="text-right font-medium px-3 py-2.5">Δ pass rate</th>
-            <th className="font-medium px-4 py-2.5 w-40">Volume</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -154,11 +152,6 @@ function ExecutionTrendTable({ runs }: { runs: QaseRun[] }) {
                   {r.passRate === null ? '—' : `${r.passRate.toFixed(1)}%`}
                 </td>
                 <td className="px-3 py-2.5 text-right text-xs"><Delta value={r.passDelta} suffix="pp" /></td>
-                <td className="px-4 py-2.5">
-                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-violet-400" style={{ width: `${(r.cases / maxCases) * 100}%` }} />
-                  </div>
-                </td>
               </tr>
             );
           })}
