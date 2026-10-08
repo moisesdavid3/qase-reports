@@ -25,15 +25,22 @@ async function fetchAllCasesSuiteIds(
   projectCode: string,
   total: number,
 ): Promise<Array<{ id: number; suite_id: number | null }>> {
-  const cap = Math.min(total, 2000);
-  const batches = await Promise.all(
-    Array.from({ length: Math.ceil(cap / BATCH) }, (_, i) =>
-      fetchCases(token, projectCode, BATCH, i * BATCH).then((r) =>
-        r.result.entities.map((c) => ({ id: c.id, suite_id: c.suite_id })),
+  const all: Array<{ id: number; suite_id: number | null }> = [];
+  const first = await fetchCases(token, projectCode, BATCH, 0);
+  all.push(...first.result.entities.map((c) => ({ id: c.id, suite_id: c.suite_id })));
+  const actualTotal = first.result.total;
+  if (actualTotal > BATCH) {
+    const pages = Math.ceil((actualTotal - BATCH) / BATCH);
+    const rest = await Promise.all(
+      Array.from({ length: pages }, (_, i) =>
+        fetchCases(token, projectCode, BATCH, (i + 1) * BATCH).then((r) =>
+          r.result.entities.map((c) => ({ id: c.id, suite_id: c.suite_id })),
+        ),
       ),
-    ),
-  );
-  return batches.flat();
+    );
+    all.push(...rest.flat());
+  }
+  return all;
 }
 
 /**

@@ -82,7 +82,7 @@ export async function fetchResults(
   offset = 0,
 ): Promise<QaseResultsResponse> {
   const { data } = await createClient(token).get<QaseResultsResponse>(`/result/${projectCode}`, {
-    params: { limit, offset, run_id: runId },
+    params: { limit, offset, run: runId },
   });
   return data;
 }
