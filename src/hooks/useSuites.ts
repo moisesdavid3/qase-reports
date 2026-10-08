@@ -23,7 +23,6 @@ async function fetchAllSuites(token: string, projectCode: string): Promise<QaseS
 async function fetchAllCasesSuiteIds(
   token: string,
   projectCode: string,
-  total: number,
 ): Promise<Array<{ id: number; suite_id: number | null }>> {
   const all: Array<{ id: number; suite_id: number | null }> = [];
   const first = await fetchCases(token, projectCode, BATCH, 0);
@@ -58,7 +57,7 @@ export function useProjectCaseMap(
     queryFn: async () => {
       const [suites, cases] = await Promise.all([
         fetchAllSuites(token, projectCode),
-        fetchAllCasesSuiteIds(token, projectCode, totalCases),
+        fetchAllCasesSuiteIds(token, projectCode),
       ]);
 
       // Build suite id → full path title (leaf title only for readability)
