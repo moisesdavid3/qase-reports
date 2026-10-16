@@ -30,6 +30,25 @@ function rateColor(rate: number | null): string {
   return 'text-red-500';
 }
 
+const MIN_PASS_RATE = 70;
+
+function meetsPassRate(r: QaseRun): boolean {
+  const rate = passRateOf(r.stats.passed, executedOf(r));
+  return rate !== null && rate >= MIN_PASS_RATE;
+}
+
+function dayKey(r: QaseRun): string {
+  if (!r.start_time) return '';
+  const d = new Date(r.start_time);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function dayLabel(key: string): string {
+  if (!key) return 'No start date';
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function isOpenRun(r: QaseRun): boolean {
   return r.status_text === 'in_progress' || r.end_time === null;
 }
@@ -143,7 +162,13 @@ function groupRuns(runs: QaseRun[]): { groups: FeatureGroup[]; ungrouped: QaseRu
 
 // ─── UI ───────────────────────────────────────────────────────────────────────────────────
 
-function RunsTable({ runs, users }: { runs: QaseRun[]; users: QaseUser[] }) {
+function RunsTable({ runs, users, byDay = false }: { runs: QaseRun[]; users: QaseUser[]; byDay?: boolean }) {
+  const days = new Map<string, QaseRun[]>();
+  if (byDay) for (const r of runs) days.set(dayKey(r), [...(days.get(dayKey(r)) ?? []), r]);
+  const sections = byDay
+    ? [...days.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    : [['', runs] as [string, QaseRun[]]];
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -160,7 +185,15 @@ function RunsTable({ runs, users }: { runs: QaseRun[]; users: QaseUser[] }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-50">
-          {runs.map((r) => {
+          {sections.flatMap(([day, dayRuns]) => [
+            byDay ? (
+              <tr key={`day-${day}`} className="bg-gray-50">
+                <td colSpan={8} className="px-4 py-1.5 text-xs font-semibold text-gray-600">
+                  {dayLabel(day)} <span className="font-normal text-gray-400">· {dayRuns.length} run{dayRuns.length !== 1 ? 's' : ''}</span>
+                </td>
+              </tr>
+            ) : null,
+            ...dayRuns.map((r) => {
             const rate = passRateOf(r.stats.passed, executedOf(r));
             const author = users.find((u) => u.id === r.user_id);
             return (
@@ -183,7 +216,8 @@ function RunsTable({ runs, users }: { runs: QaseRun[]; users: QaseUser[] }) {
                 </td>
               </tr>
             );
-          })}
+            }),
+          ])}
         </tbody>
       </table>
     </div>
@@ -238,7 +272,7 @@ function FeatureCard({ group, users, jira }: { group: FeatureGroup; users: QaseU
             <p className="text-xs font-semibold text-blue-600 mb-1 uppercase tracking-wide">Summary</p>
             <p className="text-xs text-blue-800 leading-relaxed">{group.report}</p>
           </div>
-          <RunsTable runs={group.runs} users={users} />
+          <RunsTable runs={group.runs} users={users} byDay />
         </div>
       )}
     </div>
@@ -269,10 +303,12 @@ function ProjectFeaturesSection({ project, token }: { project: QaseProject; toke
   const jiraQuery = useJiraIssues(issueKeys);
   const jira = jiraQuery.data ?? {};
 
-  const { groups, ungrouped, runCount } = useMemo(() => {
+  const { groups, ungrouped, runCount, keptCount } = useMemo(() => {
     let runs = runsQuery.data ?? [];
     const title = milestones.find((m) => m.id === milestoneId)?.title;
     if (title !== undefined) runs = runs.filter((r) => r.milestone?.title === title);
+    const runCount = runs.length;
+    runs = runs.filter(meetsPassRate);
     const q = search.trim().toLowerCase();
     const res = groupRuns(runs);
     const groups = q
@@ -281,7 +317,7 @@ function ProjectFeaturesSection({ project, token }: { project: QaseProject; toke
           (jira[g.key]?.summary ?? '').toLowerCase().includes(q) ||
           g.runs.some((r) => r.title.toLowerCase().includes(q)))
       : res.groups;
-    return { groups, ungrouped: res.ungrouped, runCount: runs.length };
+    return { groups, ungrouped: res.ungrouped, runCount, keptCount: runs.length };
   }, [runsQuery.data, milestoneId, milestones, search, jiraQuery.data]);
 
   const linkedRuns = groups.reduce((s, g) => s + g.runs.length, 0);
@@ -342,6 +378,12 @@ function ProjectFeaturesSection({ project, token }: { project: QaseProject; toke
         </p>
       )}
 
+      {!runsQuery.isLoading && (
+        <p className="text-xs text-gray-400">
+          Showing only runs with {MIN_PASS_RATE}%+ pass rate ({keptCount.toLocaleString()} of {runCount.toLocaleString()}). Pass rates, summaries and exports are calculated from these runs.
+        </p>
+      )}
+
       {runsQuery.isLoading && (
         <div className="flex items-center justify-center gap-2 py-16 text-gray-400 text-sm">
           <Loader2 size={18} className="animate-spin" /> Loading runs…
@@ -353,7 +395,7 @@ function ProjectFeaturesSection({ project, token }: { project: QaseProject; toke
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { label: 'Features / user stories', value: groups.length.toLocaleString(), sub: 'with linked test runs' },
-              { label: 'Linked runs', value: linkedRuns.toLocaleString(), sub: `of ${runCount.toLocaleString()} runs analysed` },
+              { label: 'Linked runs', value: linkedRuns.toLocaleString(), sub: `of ${keptCount.toLocaleString()} runs with ${MIN_PASS_RATE}%+ pass rate` },
               { label: 'Overall pass rate', value: overall === null ? '—' : `${overall.toFixed(1)}%`, sub: 'passed / executed' },
               { label: 'Runs without issue', value: ungrouped.length.toLocaleString(), sub: 'no External Issue linked' },
             ].map((t) => (
@@ -390,6 +432,7 @@ function ProjectFeaturesSection({ project, token }: { project: QaseProject; toke
                 <RunsTable
                   runs={[...ungrouped].sort((a, b) => new Date(b.start_time ?? 0).getTime() - new Date(a.start_time ?? 0).getTime()).slice(0, 100)}
                   users={users}
+                  byDay
                 />
               )}
             </div>
@@ -412,7 +455,7 @@ export function FeaturesReport({ projects, workspace }: Props) {
         </h2>
         <p className="text-sm text-gray-400 mt-0.5">
           Runs grouped by their Jira External Issue, with pass rate and a short summary per feature.
-          Pass rate = passed / executed cases. Based on the most recent 500 runs.
+          Only runs with 70%+ pass rate (passed / executed cases) are included. Based on the most recent 500 runs.
         </p>
       </div>
 
