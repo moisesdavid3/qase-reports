@@ -534,39 +534,6 @@ function AuthorStats({ runs, users }: { runs: QaseRun[]; users: QaseUser[] }) {
   );
 }
 
-function FailingRunsHighlight({ runs, users }: { runs: QaseRun[]; users: QaseUser[] }) {
-  const failing = runs
-    .filter((r) => r.stats.total > 0 && r.stats.passed / r.stats.total < 0.7)
-    .sort((a, b) => (a.stats.passed / a.stats.total) - (b.stats.passed / b.stats.total))
-    .slice(0, 5);
-
-  if (failing.length === 0) return null;
-
-  return (
-    <div>
-      <p className="text-xs font-medium text-red-500 mb-2 uppercase tracking-wide flex items-center gap-1">
-        <XCircle size={11} /> Runs below 70% pass rate
-      </p>
-      <div className="space-y-1.5">
-        {failing.map((r) => {
-          const passRate = (r.stats.passed / r.stats.total) * 100;
-          const author = users.find((u) => u.id === r.user_id);
-          return (
-            <div key={r.id} className="flex items-center gap-2 text-sm">
-              <span className="text-red-500 font-semibold text-xs w-10 text-right">{passRate.toFixed(0)}%</span>
-              <div className="flex-1 min-w-0">
-                <span className="text-gray-700 truncate block" title={r.title}>{r.title}</span>
-                {author && <span className="text-xs text-gray-400">by {author.name}</span>}
-              </div>
-              <span className="text-xs text-red-400 flex-shrink-0">{r.stats.failed} failed</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function SuiteCoverage({ suites, isLoading }: { suites: SuiteStat[]; isLoading: boolean }) {
   if (isLoading) {
     return (
@@ -640,6 +607,30 @@ function SuiteCoverage({ suites, isLoading }: { suites: SuiteStat[]; isLoading: 
   );
 }
 
+const MIN_PASS_RATE = 70;
+
+function meetsPassRate(r: QaseRun): boolean {
+  return r.stats.total > 0 && (r.stats.passed / r.stats.total) * 100 >= MIN_PASS_RATE;
+}
+
+function dayKey(r: QaseRun): string {
+  return toInputDate(new Date(r.start_time as string));
+}
+
+function dayLabel(key: string): string {
+  return parseLocalDate(key).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function generateKeptSummary(kept: QaseRun[], all: QaseRun[], t: ReturnType<typeof sumStats>, passRate: number): string {
+  const parts = [
+    `Based on the ${kept.length} of ${all.length} run${all.length !== 1 ? 's' : ''} with ${MIN_PASS_RATE}%+ pass rate: ${t.total.toLocaleString()} cases executed, ${passRate.toFixed(1)}% pass rate.`,
+  ];
+  if (t.failed > 0) parts.push(`${t.failed.toLocaleString()} cases failed (${((t.failed / t.total) * 100).toFixed(1)}%).`);
+  if (t.blocked > 0) parts.push(`${t.blocked.toLocaleString()} cases blocked.`);
+  if (t.skipped > 0 && t.skipped / t.total > 0.1) parts.push(`High skip rate (${((t.skipped / t.total) * 100).toFixed(0)}%).`);
+  return parts.join(' ');
+}
+
 function WeekSection({
   week,
   users,
@@ -657,7 +648,14 @@ function WeekSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
-  const resultsQuery = usePeriodResults(token, projectCode, week.runs, open && week.runs.length > 0);
+  const keptRuns = useMemo(() => week.runs.filter(meetsPassRate), [week.runs]);
+  const kept = useMemo(() => {
+    const t = sumStats(keptRuns);
+    const passRate = t.total > 0 ? (t.passed / t.total) * 100 : 0;
+    return { ...t, passRate, analysis: generateKeptSummary(keptRuns, week.runs, t, passRate) };
+  }, [keptRuns, week.runs]);
+
+  const resultsQuery = usePeriodResults(token, projectCode, keptRuns, open && keptRuns.length > 0);
   const suiteStats = useMemo(
     () => (resultsQuery.data ? buildSuiteStats(resultsQuery.data, caseToSuite) : []),
     [resultsQuery.data, caseToSuite],
@@ -700,27 +698,35 @@ function WeekSection({
         />
       </button>
 
-      {open && week.total > 0 && (
+      {open && week.total > 0 && keptRuns.length === 0 && (
+        <p className="px-5 py-4 text-xs text-gray-400">
+          None of the {week.runs.length} run{week.runs.length !== 1 ? 's' : ''} in this period reached {MIN_PASS_RATE}% pass rate.
+        </p>
+      )}
+
+      {open && week.total > 0 && keptRuns.length > 0 && (
         <div className="divide-y divide-gray-100">
+          <p className="px-5 py-2 text-xs text-gray-400 bg-white">
+            Showing only runs with {MIN_PASS_RATE}%+ pass rate ({keptRuns.length} of {week.runs.length}). Everything below is calculated from these runs.
+          </p>
+
           {/* Pass rate bar */}
           <div className="px-5 py-4">
             <PassRateBar
-              passed={week.passed}
-              failed={week.failed}
-              blocked={week.blocked}
-              skipped={week.skipped}
-              invalid={week.invalid}
-              total={week.total}
+              passed={kept.passed}
+              failed={kept.failed}
+              blocked={kept.blocked}
+              skipped={kept.skipped}
+              invalid={kept.invalid}
+              total={kept.total}
             />
           </div>
 
-          {/* Analysis — general stats-based summary */}
           <div className="px-5 py-3 bg-blue-50 border-l-4 border-blue-300">
             <p className="text-xs font-semibold text-blue-600 mb-1 uppercase tracking-wide">Summary</p>
-            <p className="text-xs text-blue-700 leading-relaxed">{week.analysis}</p>
+            <p className="text-xs text-blue-700 leading-relaxed">{kept.analysis}</p>
           </div>
 
-          {/* Detailed suite-aware narrative — shown once results are loaded */}
           {resultsQuery.isLoading && (
             <div className="px-5 py-3 bg-indigo-50 border-l-4 border-indigo-200">
               <div className="flex items-center gap-2 text-xs text-indigo-400">
@@ -729,7 +735,7 @@ function WeekSection({
             </div>
           )}
           {!resultsQuery.isLoading && suiteStats.length > 0 && (() => {
-            const narrative = generateDetailedAnalysis(week, suiteStats);
+            const narrative = generateDetailedAnalysis({ ...week, ...kept, runs: keptRuns }, suiteStats);
             return narrative ? (
               <div className="px-5 py-3 bg-indigo-50 border-l-4 border-indigo-300">
                 <p className="text-xs font-semibold text-indigo-600 mb-1 uppercase tracking-wide">Detailed Analysis</p>
@@ -752,35 +758,36 @@ function WeekSection({
             <SuiteCoverage suites={suiteStats} isLoading={resultsQuery.isLoading} />
           </div>
 
-          {/* Failing runs highlight */}
-          {week.runs.some((r) => r.stats.total > 0 && r.stats.passed / r.stats.total < 0.7) && (
-            <div className="px-5 py-3">
-              <FailingRunsHighlight runs={week.runs} users={users} />
-            </div>
-          )}
+          <div className="px-5 py-3">
+            <AuthorStats runs={keptRuns} users={users} />
+          </div>
 
-          {/* Author stats */}
-          {week.runs.length > 0 && (
-            <div className="px-5 py-3">
-              <AuthorStats runs={week.runs} users={users} />
-            </div>
-          )}
-
-          {/* All runs */}
+          {/* Runs with pass rate >= 70%, grouped by day */}
           <div className="px-5 py-3">
             <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide flex items-center gap-1">
-              <Play size={11} /> All runs ({week.runs.length})
+              <Play size={11} /> Runs with {MIN_PASS_RATE}%+ pass rate ({keptRuns.length})
             </p>
-            <div>
-              {week.runs
-                .slice()
-                .sort((a, b) => {
-                  if (!a.start_time) return 1;
-                  if (!b.start_time) return -1;
-                  return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
-                })
-                .map((r) => (
-                  <RunRow key={r.id} run={r} users={users} />
+            <div className="space-y-3">
+              {[...keptRuns
+                .reduce((m, r) => {
+                  const k = dayKey(r);
+                  m.set(k, [...(m.get(k) ?? []), r]);
+                  return m;
+                }, new Map<string, QaseRun[]>())
+                .entries()]
+                .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+                .map(([day, dayRuns]) => (
+                  <div key={day}>
+                    <p className="text-xs font-semibold text-gray-600 mb-0.5">
+                      {dayLabel(day)} <span className="font-normal text-gray-400">· {dayRuns.length} run{dayRuns.length !== 1 ? 's' : ''}</span>
+                    </p>
+                    {dayRuns
+                      .slice()
+                      .sort((a, b) => new Date(b.start_time as string).getTime() - new Date(a.start_time as string).getTime())
+                      .map((r) => (
+                        <RunRow key={r.id} run={r} users={users} />
+                      ))}
+                  </div>
                 ))}
             </div>
           </div>
