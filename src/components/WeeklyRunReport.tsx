@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import {
   Loader2, ChevronDown, TrendingUp, TrendingDown, Minus,
-  CheckCircle2, XCircle, AlertCircle, Clock, Users, Play, BarChart2, Layers,
+  CheckCircle2, XCircle, AlertCircle, Clock, Users, Play, BarChart2, Layers, Copy, Check,
 } from 'lucide-react';
 import type { QaseProject, QaseRun, QaseResult, QaseUser, Workspace } from '../types/qase';
 import { useAllRuns } from '../hooks/useRuns';
@@ -727,6 +727,81 @@ function RunsDigest({ groups, runCount, loadingSuites }: { groups: DigestGroup[]
   );
 }
 
+function buildSlideSummary(
+  label: string,
+  kept: { total: number; passRate: number; failed: number },
+  runCount: number,
+  totalRuns: number,
+  digest: DigestGroup[],
+  suites: SuiteStat[],
+): { title: string; bullets: string[]; note: string } {
+  const bullets = [
+    `${runCount} test run${runCount !== 1 ? 's' : ''} · ${kept.total.toLocaleString()} cases executed · ${kept.passRate.toFixed(0)}% pass rate`,
+  ];
+  if (digest.length > 0) {
+    bullets.push(`Testing focus: ${digest.slice(0, 4).map((g) => g.name).join('; ')}`);
+  }
+  if (suites.length > 0) {
+    bullets.push(`Areas covered: ${suites.length} suites, most tested ${suites.slice(0, 3).map((x) => x.name).join(', ')}`);
+    const weak = suites.filter((x) => x.total >= 3 && x.passRate < 70).slice(0, 3);
+    bullets.push(
+      weak.length > 0
+        ? `Needs follow-up: ${weak.map((x) => `${x.name} (${x.passRate.toFixed(0)}%)`).join(', ')}`
+        : 'No suites below 70% pass rate',
+    );
+  }
+  return {
+    title: `QE test execution · ${label}`,
+    bullets,
+    note: `Based on runs with ${MIN_PASS_RATE}%+ pass rate (${runCount} of ${totalRuns}).`,
+  };
+}
+
+function SlideSummary({ title, bullets, note }: { title: string; bullets: string[]; note: string }) {
+  const [copied, setCopied] = useState(false);
+  const text = `${title}\n${bullets.map((b) => `• ${b}`).join('\n')}\n${note}`;
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (!ok) {
+        window.prompt('Copy the summary:', text);
+        return;
+      }
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className="px-5 py-3 bg-amber-50 border-l-4 border-amber-300">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Slide summary</p>
+        <button
+          onClick={copy}
+          className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-amber-700 bg-white border border-amber-200 rounded-md hover:bg-amber-100 transition-colors"
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <p className="text-sm font-semibold text-gray-900">{title}</p>
+      <ul className="list-disc pl-4 mt-1 space-y-0.5 text-xs text-gray-700">
+        {bullets.map((b) => <li key={b}>{b}</li>)}
+      </ul>
+      <p className="text-[11px] text-gray-400 mt-1.5">{note}</p>
+    </div>
+  );
+}
+
 const MIN_PASS_RATE = 70;
 
 function meetsPassRate(r: QaseRun): boolean {
@@ -785,6 +860,11 @@ function WeekSection({
   const digest = useMemo(
     () => buildDigest(keptRuns, users, resultsQuery.data, caseToSuite),
     [keptRuns, users, resultsQuery.data, caseToSuite],
+  );
+
+  const slide = useMemo(
+    () => buildSlideSummary(week.label, kept, keptRuns.length, week.runs.length, digest, suiteStats),
+    [week.label, kept, keptRuns.length, week.runs.length, digest, suiteStats],
   );
 
   const passRateColor = week.total === 0 ? 'text-gray-400'
@@ -852,6 +932,8 @@ function WeekSection({
             <p className="text-xs font-semibold text-blue-600 mb-1 uppercase tracking-wide">Summary</p>
             <p className="text-xs text-blue-700 leading-relaxed">{kept.analysis}</p>
           </div>
+
+          <SlideSummary {...slide} />
 
           {resultsQuery.isLoading && (
             <div className="px-5 py-3 bg-indigo-50 border-l-4 border-indigo-200">
