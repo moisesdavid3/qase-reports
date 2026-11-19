@@ -1,13 +1,14 @@
 import { useState, useMemo } from 'react';
 import {
   Loader2, ChevronDown, TrendingUp, TrendingDown, Minus,
-  CheckCircle2, XCircle, AlertCircle, Clock, Users, Play, BarChart2, Layers, Copy, Check,
+  CheckCircle2, XCircle, AlertCircle, Clock, Users, Play, BarChart2, Layers,
 } from 'lucide-react';
 import type { QaseProject, QaseRun, QaseResult, QaseUser, Workspace } from '../types/qase';
 import { useAllRuns } from '../hooks/useRuns';
 import { useUsers } from '../hooks/useUsers';
 import { usePeriodResults } from '../hooks/useResults';
 import { ExternalIssueLink } from './ExternalIssueLink';
+import { CopyButton } from './CopyButton';
 import { useProjectCaseMap } from '../hooks/useSuites';
 import { useAllMilestones } from '../hooks/useMilestones';
 
@@ -758,40 +759,12 @@ function buildSlideSummary(
 }
 
 function SlideSummary({ title, bullets, note }: { title: string; bullets: string[]; note: string }) {
-  const [copied, setCopied] = useState(false);
   const text = `${title}\n${bullets.map((b) => `• ${b}`).join('\n')}\n${note}`;
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(ta);
-      if (!ok) {
-        window.prompt('Copy the summary:', text);
-        return;
-      }
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
   return (
     <div className="px-5 py-3 bg-amber-50 border-l-4 border-amber-300">
       <div className="flex items-center justify-between gap-2 mb-1.5">
         <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Slide summary</p>
-        <button
-          onClick={copy}
-          className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-amber-700 bg-white border border-amber-200 rounded-md hover:bg-amber-100 transition-colors"
-        >
-          {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
-        </button>
+        <CopyButton text={text} className="text-amber-700 bg-white border-amber-200 hover:bg-amber-100" />
       </div>
       <p className="text-sm font-semibold text-gray-900">{title}</p>
       <ul className="list-disc pl-4 mt-1 space-y-0.5 text-xs text-gray-700">

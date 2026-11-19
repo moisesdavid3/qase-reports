@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft, CheckSquare, Layers, Milestone, Play, Bug,
-  ChevronDown, Loader2, AlertCircle, Search, ChevronLeft, ChevronRight, X, Download, Bot, CalendarDays, Activity,
+  ChevronDown, Loader2, AlertCircle, Search, ChevronLeft, ChevronRight, X, Download, Bot, CalendarDays, Activity, ShieldCheck,
 } from 'lucide-react';
 import type { QaseProject, Workspace } from '../types/qase';
 import { useRuns, useRunsTotal, useAllRuns, PAGE_SIZE } from '../hooks/useRuns';
@@ -12,6 +12,7 @@ import { AutomationReport } from './AutomationReport';
 import { WeeklyRunReport } from './WeeklyRunReport';
 import { TrendsReport } from './TrendsReport';
 import { FeaturesReport } from './FeaturesReport';
+import { RiskReport } from './RiskReport';
 import { ExternalIssueLink } from './ExternalIssueLink';
 
 interface Props {
@@ -20,7 +21,7 @@ interface Props {
   onBack: () => void;
 }
 
-type Tab = 'overview' | 'automation' | 'weekly' | 'trends' | 'features';
+type Tab = 'overview' | 'automation' | 'weekly' | 'trends' | 'features' | 'risk';
 
 export function ReportView({ projects, workspace, onBack }: Props) {
   const [tab, setTab] = useState<Tab>('overview');
@@ -84,6 +85,13 @@ export function ReportView({ projects, workspace, onBack }: Props) {
             <Layers size={13} />
             Features
           </button>
+          <button
+            onClick={() => setTab('risk')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === 'risk' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <ShieldCheck size={13} />
+            Risk
+          </button>
         </div>
       </div>
 
@@ -101,6 +109,10 @@ export function ReportView({ projects, workspace, onBack }: Props) {
 
       {tab === 'features' && (
         <FeaturesReport projects={projects} workspace={workspace} />
+      )}
+
+      {tab === 'risk' && (
+        <RiskReport projects={projects} workspace={workspace} />
       )}
 
       {tab === 'overview' && (
