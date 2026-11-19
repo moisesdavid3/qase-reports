@@ -89,76 +89,131 @@ function buildSuiteStats(results: QaseResult[], caseToSuite: Map<number, string>
     .sort((a, b) => b.total - a.total);
 }
 
-// ─── Detailed suite-aware narrative ──────────────────────────────────────────────────────
+// ─── Detailed suite-aware analysis ───────────────────────────────────────────────────────
 
-function generateDetailedAnalysis(week: WeekData, suites: SuiteStat[]): string {
-  if (suites.length === 0 || week.total === 0) return '';
+interface SuiteSection {
+  name: string;
+  passRate: number;
+  tone: 'good' | 'warn' | 'bad';
+  bullets: string[];
+}
 
-  const parts: string[] = [];
+interface DetailedAnalysisData {
+  overview: string[];
+  suites: SuiteSection[];
+  hiddenSuites: number;
+}
+
+const MAX_SUITE_SECTIONS = 10;
+
+function buildDetailedAnalysis(runCount: number, suites: SuiteStat[]): DetailedAnalysisData | null {
+  if (suites.length === 0) return null;
   const totalResults = suites.reduce((s, x) => s + x.total, 0);
+  const plural = (n: number, w: string) => `${n.toLocaleString()} ${w}${n !== 1 ? 's' : ''}`;
 
-  // Coverage breadth
-  const suiteNames = suites.slice(0, 5).map((s) => `"${s.name}"`);
-  const moreCount = suites.length > 5 ? suites.length - 5 : 0;
-  const suiteList = moreCount > 0
-    ? `${suiteNames.join(', ')}, and ${moreCount} more suite${moreCount !== 1 ? 's' : ''}`
-    : suiteNames.join(suiteNames.length > 1 ? ', and ' : '');
-  parts.push(
-    `This period covered ${suites.length} suite${suites.length !== 1 ? 's' : ''} across ${totalResults.toLocaleString()} test case execution${totalResults !== 1 ? 's' : ''} in ${week.runs.length} run${week.runs.length !== 1 ? 's' : ''}: ${suiteList}.`,
-  );
-
-  // Best performing suites
-  const topSuites = suites.filter((s) => s.total >= 3 && s.passRate === 100);
-  if (topSuites.length > 0) {
-    const names = topSuites.slice(0, 3).map((s) => `"${s.name}" (${s.total} cases)`).join(', ');
-    parts.push(`Full coverage with 100% pass rate in ${names}.`);
-  }
-
-  // Worst-performing suites (by pass rate, min 3 cases)
-  const failingSuites = suites
-    .filter((s) => s.total >= 3 && s.passRate < 70)
-    .sort((a, b) => a.passRate - b.passRate)
-    .slice(0, 3);
-  if (failingSuites.length > 0) {
-    const details = failingSuites.map((s) => {
-      const pct = s.passRate.toFixed(0);
-      return `"${s.name}" (${pct}% pass, ${s.failed} failed${s.blocked > 0 ? `, ${s.blocked} blocked` : ''})`;
-    }).join('; ');
-    parts.push(`Areas needing attention: ${details}.`);
-  }
-
-  // Suites with blocks
-  const blockedSuites = suites.filter((s) => s.blocked > 0).sort((a, b) => b.blocked - a.blocked).slice(0, 3);
-  if (blockedSuites.length > 0) {
-    const detail = blockedSuites.map((s) => `"${s.name}" (${s.blocked} blocked)`).join(', ');
-    parts.push(`Blocked test cases detected in ${detail} — dependencies or environment issues may be blocking progress.`);
-  }
-
-  // Skipped
-  const totalSkipped = suites.reduce((s, x) => s + x.skipped, 0);
-  const skipRate = totalResults > 0 ? totalSkipped / totalResults : 0;
-  if (skipRate > 0.1) {
-    const skippedSuites = suites.filter((s) => s.skipped > 0).sort((a, b) => b.skipped - a.skipped).slice(0, 2);
-    const detail = skippedSuites.map((s) => `"${s.name}" (${s.skipped})`).join(', ');
-    parts.push(`${(skipRate * 100).toFixed(0)}% of cases were skipped or invalid, mainly in ${detail}. Review whether these are intentional exclusions.`);
-  }
-
-  // Most tested suite
+  const overview: string[] = [
+    `Coverage: ${plural(suites.length, 'suite')}, ${plural(totalResults, 'test case execution')} across ${plural(runCount, 'run')}.`,
+  ];
   const mostTested = suites[0];
-  if (mostTested && mostTested.total > totalResults * 0.3) {
-    parts.push(`"${mostTested.name}" was the most exercised area, accounting for ${((mostTested.total / totalResults) * 100).toFixed(0)}% of all cases executed this period.`);
+  if (mostTested.total > totalResults * 0.3) {
+    overview.push(`Most exercised area: "${mostTested.name}" (${((mostTested.total / totalResults) * 100).toFixed(0)}% of all executions).`);
   }
-
-  // Overall suite health summary
-  const healthySuites = suites.filter((s) => s.passRate >= 90).length;
-  const criticalSuites = suites.filter((s) => s.passRate < 70 && s.total >= 3).length;
   if (suites.length >= 3) {
-    parts.push(
-      `Suite health: ${healthySuites} of ${suites.length} suites at ≥90% pass rate${criticalSuites > 0 ? `, ${criticalSuites} suite${criticalSuites !== 1 ? 's' : ''} below 70% requiring follow-up` : ''}.`,
+    const healthy = suites.filter((s) => s.passRate >= 90).length;
+    const critical = suites.filter((s) => s.passRate < 70 && s.total >= 3).length;
+    overview.push(
+      `Suite health: ${healthy} of ${suites.length} at 90%+ pass rate${critical > 0 ? `; ${critical} below 70% need follow-up` : ''}.`,
     );
   }
+  const totalSkipped = suites.reduce((s, x) => s + x.skipped, 0);
+  if (totalResults > 0 && totalSkipped / totalResults > 0.1) {
+    overview.push(`${((totalSkipped / totalResults) * 100).toFixed(0)}% of executions were skipped or invalid; confirm these exclusions are intentional.`);
+  }
 
-  return parts.join(' ');
+  const sections: SuiteSection[] = suites.slice(0, MAX_SUITE_SECTIONS).map((s) => {
+    const bullets = [
+      `${plural(s.total, 'execution')}: ${s.passed.toLocaleString()} passed, ${s.failed.toLocaleString()} failed${s.blocked > 0 ? `, ${s.blocked.toLocaleString()} blocked` : ''}${s.skipped > 0 ? `, ${s.skipped.toLocaleString()} skipped` : ''}.`,
+    ];
+    let tone: SuiteSection['tone'] = 'warn';
+    if (s.total >= 3 && s.passRate === 100) {
+      tone = 'good';
+      bullets.push('Full coverage with a 100% pass rate.');
+    } else if (s.passRate >= 90) {
+      tone = 'good';
+      bullets.push('Healthy: no follow-up needed.');
+    } else if (s.passRate < 70 && s.total >= 3) {
+      tone = 'bad';
+      bullets.push(`Needs attention: ${s.failed.toLocaleString()} failures drive the ${s.passRate.toFixed(0)}% pass rate.`);
+    }
+    if (s.blocked > 0) bullets.push('Blocked cases suggest a dependency or environment issue.');
+    return { name: s.name, passRate: s.passRate, tone, bullets };
+  });
+
+  return { overview, suites: sections, hiddenSuites: Math.max(0, suites.length - MAX_SUITE_SECTIONS) };
+}
+
+// ─── Test run digest ─────────────────────────────────────────────────────────────────────
+
+interface DigestGroup {
+  name: string;
+  runs: number;
+  cases: number;
+  passed: number;
+  firstDay: Date;
+  lastDay: Date;
+  issues: string[];
+  authors: string[];
+  suites: string[];
+}
+
+// Strips the Jira key prefix and the auto-generated "<id>-<ddmmyyyy>-<yyyy-mm-dd>" suffix so runs of the same kind group together.
+function normalizeRunTitle(title: string): string {
+  const clean = title
+    .replace(/\s*\d+-\d{8}-\d{4}-\d{2}-\d{2}\s*$/, '')
+    .replace(/\s*[-–]?\s*\d{4}-\d{2}-\d{2}\s*$/, '')
+    .replace(/^[A-Z][A-Z0-9]+-\d+\s+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return clean || title;
+}
+
+function buildDigest(runs: QaseRun[], users: QaseUser[], results: QaseResult[] | undefined, caseToSuite: Map<number, string>): DigestGroup[] {
+  const suitesByRun = new Map<number, Map<string, number>>();
+  for (const r of results ?? []) {
+    const name = r.case?.suite_title?.trim() || caseToSuite.get(r.case_id);
+    if (!name) continue;
+    const m = suitesByRun.get(r.run_id) ?? new Map<string, number>();
+    m.set(name, (m.get(name) ?? 0) + 1);
+    suitesByRun.set(r.run_id, m);
+  }
+
+  const groups = new Map<string, { runs: QaseRun[]; suites: Map<string, number> }>();
+  for (const r of runs) {
+    const key = normalizeRunTitle(r.title);
+    const g = groups.get(key) ?? { runs: [], suites: new Map<string, number>() };
+    g.runs.push(r);
+    for (const [n, c] of suitesByRun.get(r.id) ?? []) g.suites.set(n, (g.suites.get(n) ?? 0) + c);
+    groups.set(key, g);
+  }
+
+  return [...groups.entries()]
+    .map(([name, g]) => {
+      const times = g.runs.map((r) => new Date(r.start_time as string).getTime());
+      const issues = [...new Set(g.runs.map((r) => r.external_issue?.id).filter((x): x is string => !!x))];
+      const authors = [...new Set(g.runs.map((r) => users.find((u) => u.id === r.user_id)?.name).filter((x): x is string => !!x))];
+      return {
+        name,
+        runs: g.runs.length,
+        cases: g.runs.reduce((s, r) => s + r.stats.total, 0),
+        passed: g.runs.reduce((s, r) => s + r.stats.passed, 0),
+        firstDay: new Date(Math.min(...times)),
+        lastDay: new Date(Math.max(...times)),
+        issues,
+        authors,
+        suites: [...g.suites.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n),
+      };
+    })
+    .sort((a, b) => b.cases - a.cases);
 }
 
 // ─── Analysis text ────────────────────────────────────────────────────────────────────────
@@ -607,6 +662,71 @@ function SuiteCoverage({ suites, isLoading }: { suites: SuiteStat[]; isLoading: 
   );
 }
 
+function DetailedAnalysis({ data }: { data: DetailedAnalysisData }) {
+  const toneClass = { good: 'text-green-600', warn: 'text-yellow-600', bad: 'text-red-500' };
+  return (
+    <div className="px-5 py-3 bg-indigo-50 border-l-4 border-indigo-300 space-y-3">
+      <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Detailed Analysis</p>
+      <ul className="list-disc pl-4 space-y-1 text-xs text-indigo-900 leading-relaxed">
+        {data.overview.map((b) => <li key={b}>{b}</li>)}
+      </ul>
+      <div className="grid gap-2 md:grid-cols-2">
+        {data.suites.map((s) => (
+          <div key={s.name} className="rounded-lg bg-white/70 border border-indigo-100 px-3 py-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-xs font-semibold text-gray-800 truncate" title={s.name}>{s.name}</p>
+              <span className={`text-xs font-bold flex-shrink-0 ${toneClass[s.tone]}`}>{s.passRate.toFixed(0)}%</span>
+            </div>
+            <ul className="list-disc pl-4 mt-1 space-y-0.5 text-xs text-gray-600">
+              {s.bullets.map((b) => <li key={b}>{b}</li>)}
+            </ul>
+          </div>
+        ))}
+      </div>
+      {data.hiddenSuites > 0 && (
+        <p className="text-xs text-indigo-500">…and {data.hiddenSuites} more suite{data.hiddenSuites !== 1 ? 's' : ''} (see Areas covered).</p>
+      )}
+    </div>
+  );
+}
+
+function RunsDigest({ groups, runCount, loadingSuites }: { groups: DigestGroup[]; runCount: number; loadingSuites: boolean }) {
+  if (groups.length === 0) return null;
+  const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const top = groups.slice(0, 12);
+  const focus = groups.slice(0, 3).map((g) => `"${g.name}"`).join(', ');
+  return (
+    <div className="px-5 py-3 bg-emerald-50 border-l-4 border-emerald-300 space-y-2">
+      <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide flex items-center gap-1.5">
+        Test runs digest
+        {loadingSuites && <Loader2 size={10} className="animate-spin text-emerald-400" />}
+      </p>
+      <p className="text-xs text-emerald-900">
+        {runCount} run{runCount !== 1 ? 's' : ''} grouped into {groups.length} distinct testing effort{groups.length !== 1 ? 's' : ''}. Main focus: {focus}.
+      </p>
+      <ul className="list-disc pl-4 space-y-1.5 text-xs text-gray-700">
+        {top.map((g) => (
+          <li key={g.name}>
+            <span className="font-semibold text-gray-900">{g.name}</span>
+            <span className="text-gray-500">
+              {' '}— {g.runs} run{g.runs !== 1 ? 's' : ''}, {g.cases.toLocaleString()} cases, {g.cases > 0 ? ((g.passed / g.cases) * 100).toFixed(0) : 0}% pass,{' '}
+              {g.firstDay.toDateString() === g.lastDay.toDateString() ? fmt(g.firstDay) : `${fmt(g.firstDay)}–${fmt(g.lastDay)}`}
+              {g.issues.length > 0 && <> · {g.issues.join(', ')}</>}
+              {g.authors.length > 0 && <> · {g.authors.join(', ')}</>}
+            </span>
+            {g.suites.length > 0 && (
+              <div className="text-gray-500">Covered: {g.suites.join(', ')}</div>
+            )}
+          </li>
+        ))}
+      </ul>
+      {groups.length > top.length && (
+        <p className="text-xs text-emerald-600">…and {groups.length - top.length} more.</p>
+      )}
+    </div>
+  );
+}
+
 const MIN_PASS_RATE = 70;
 
 function meetsPassRate(r: QaseRun): boolean {
@@ -659,6 +779,12 @@ function WeekSection({
   const suiteStats = useMemo(
     () => (resultsQuery.data ? buildSuiteStats(resultsQuery.data, caseToSuite) : []),
     [resultsQuery.data, caseToSuite],
+  );
+
+  const analysis = useMemo(() => buildDetailedAnalysis(keptRuns.length, suiteStats), [keptRuns.length, suiteStats]);
+  const digest = useMemo(
+    () => buildDigest(keptRuns, users, resultsQuery.data, caseToSuite),
+    [keptRuns, users, resultsQuery.data, caseToSuite],
   );
 
   const passRateColor = week.total === 0 ? 'text-gray-400'
@@ -734,15 +860,9 @@ function WeekSection({
               </div>
             </div>
           )}
-          {!resultsQuery.isLoading && suiteStats.length > 0 && (() => {
-            const narrative = generateDetailedAnalysis({ ...week, ...kept, runs: keptRuns }, suiteStats);
-            return narrative ? (
-              <div className="px-5 py-3 bg-indigo-50 border-l-4 border-indigo-300">
-                <p className="text-xs font-semibold text-indigo-600 mb-1 uppercase tracking-wide">Detailed Analysis</p>
-                <p className="text-xs text-indigo-800 leading-relaxed">{narrative}</p>
-              </div>
-            ) : null;
-          })()}
+          {!resultsQuery.isLoading && analysis && <DetailedAnalysis data={analysis} />}
+
+          <RunsDigest groups={digest} runCount={keptRuns.length} loadingSuites={resultsQuery.isLoading} />
 
           {/* Areas covered — suite breakdown from actual test results */}
           <div className="px-5 py-3">
