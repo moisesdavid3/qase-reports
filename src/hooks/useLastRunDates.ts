@@ -3,7 +3,7 @@ import { fetchRuns } from '../api/qase';
 import type { QaseProject } from '../types/qase';
 
 // Runs come back oldest-first, so the last run is the one at offset total - 1.
-export function useLastRunDates(token: string, projects: QaseProject[]): Record<string, number | null> {
+export function useLastRunDates(token: string, projects: QaseProject[]): { dates: Record<string, number | null>; ready: boolean } {
   const results = useQueries({
     queries: projects.map((p) => ({
       queryKey: ['qase', 'last-run', token, p.code, p.counts.runs.total],
@@ -19,5 +19,6 @@ export function useLastRunDates(token: string, projects: QaseProject[]): Record<
   });
   const out: Record<string, number | null> = {};
   projects.forEach((p, i) => { out[p.code] = results[i].data ?? null; });
-  return out;
+  const ready = projects.every((p, i) => p.counts.runs.total === 0 || !results[i].isPending);
+  return { dates: out, ready };
 }

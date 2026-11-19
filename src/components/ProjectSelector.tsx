@@ -17,10 +17,11 @@ interface Props {
 export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildReport, workspace, onWorkspaceChange }: Props) {
   const [search, setSearch] = useState('');
   const [wsOpen, setWsOpen] = useState(false);
-  const { data, isLoading, isError, error } = useProjects(workspace.token);
+  const { data, isLoading: projectsLoading, isError, error } = useProjects(workspace.token);
 
   const projects = data?.result.entities ?? [];
-  const lastRuns = useLastRunDates(workspace.token, projects);
+  const { dates: lastRuns, ready: datesReady } = useLastRunDates(workspace.token, projects);
+  const isLoading = projectsLoading || !datesReady;
   const filtered = projects
     .filter(
       (p) =>
@@ -170,7 +171,7 @@ export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildRepor
         )}
 
         <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
-          {filtered.map((project) => (
+          {!isLoading && filtered.map((project) => (
             <ProjectCard
               key={project.code}
               project={project}
