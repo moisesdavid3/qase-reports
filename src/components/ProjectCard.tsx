@@ -4,10 +4,11 @@ import { CheckSquare, Layers, Play, Bug } from 'lucide-react';
 interface Props {
   project: QaseProject;
   selected: boolean;
+  lastRun?: number | null;
   onToggle: (code: string) => void;
 }
 
-export function ProjectCard({ project, selected, onToggle }: Props) {
+export function ProjectCard({ project, selected, lastRun, onToggle }: Props) {
   return (
     <button
       onClick={() => onToggle(project.code)}
@@ -62,6 +63,9 @@ export function ProjectCard({ project, selected, onToggle }: Props) {
         <Stat icon={<Play size={13} />} label="Runs" value={project.counts.runs.total} />
         <Stat icon={<Bug size={13} />} label="Defects" value={project.counts.defects.total} />
       </div>
+      <p className="mt-3 text-xs text-gray-400">
+        Last run: {lastRun ? new Date(lastRun).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+      </p>
     </button>
   );
 }

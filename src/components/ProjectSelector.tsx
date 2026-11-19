@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useProjects } from '../hooks/useProjects';
+import { useLastRunDates } from '../hooks/useLastRunDates';
 import { ProjectCard } from './ProjectCard';
 import { Search, Loader2, AlertCircle, BarChart2, ChevronDown } from 'lucide-react';
 import { WORKSPACES } from '../types/qase';
@@ -19,13 +20,14 @@ export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildRepor
   const { data, isLoading, isError, error } = useProjects(workspace.token);
 
   const projects = data?.result.entities ?? [];
+  const lastRuns = useLastRunDates(workspace.token, projects);
   const filtered = projects
     .filter(
       (p) =>
         p.title.toLowerCase().includes(search.toLowerCase()) ||
         p.code.toLowerCase().includes(search.toLowerCase()),
     )
-    .sort((a, b) => b.counts.runs.total - a.counts.runs.total);
+    .sort((a, b) => (lastRuns[b.code] ?? -1) - (lastRuns[a.code] ?? -1) || b.counts.runs.total - a.counts.runs.total);
 
   function toggleProject(code: string) {
     if (selectedCodes.includes(code)) {
@@ -173,6 +175,7 @@ export function ProjectSelector({ selectedCodes, onSelectionChange, onBuildRepor
               key={project.code}
               project={project}
               selected={selectedCodes.includes(project.code)}
+              lastRun={lastRuns[project.code]}
               onToggle={toggleProject}
             />
           ))}
